@@ -7,7 +7,7 @@ Python implementation of the algorithm presented in https://arxiv.org/abs/1910.1
 ``` python
 from empca import *
 
-W=np.diag(1/(psd))        # for non-stationary noise use full CSD matrix as weights
+W=np.diag(1/(psd))        # for non-stationary noise use full inverted CSD matrix as weights
 empca=EMPCA(n_comp=3)     # optimal number of components needs to be tuned
 X=ti_rfft(traces)         # perform phase-unwrapping FFT for time-shift invariance
 chi2s= empca.fit(X,W)     
