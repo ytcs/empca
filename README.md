@@ -11,5 +11,5 @@ W=np.diag(1/(psd))        # for non-stationary noise use inverse of full CSD mat
 empca=EMPCA(n_comp=3)     # optimal number of components needs to be tuned
 X=ti_rfft(traces)         # perform phase-unwrapping FFT for time-shift invariance
 chi2s= empca.fit(X,W)     
-recon=empca.coeff@empca.eigvec # reconstructed pulses from fitted amplitudes and templates
+recon=ti_irfft(empca.coeff@empca.eigvec) # reconstructed pulses from fitted amplitudes and templates
 ```
