@@ -82,10 +82,14 @@ class PracticeBaselines:
         self.hw = hw
         Xa = aligned(self.noise, X[use], tau[use])
         Rr = Xa - A[use, None] * hw
-        # practitioner-style outlier cut (pile-up, glitches) on the residual norm
+        # practitioner-style outlier cut (pile-up, glitches) on the residual norm,
+        # per line because the residual scale grows with energy
         rn = np.sum(Rr * Rr, axis=1)
-        med = np.median(rn)
-        clean = rn < med + 5 * 1.4826 * np.median(np.abs(rn - med))
+        clean = np.zeros(len(rn), bool)
+        for i in range(len(self.lines)):
+            m = lab[use] == i
+            med = np.median(rn[m])
+            clean[m] = rn[m] < med + 5 * 1.4826 * np.median(np.abs(rn[m] - med))
         w, U = np.linalg.eigh(Rr[clean].T @ Rr[clean] / clean.sum())
         self.V = U[:, np.argsort(w)[::-1][: self.n_proj]].T
         F = self._features(Xa, A[use], tau[use])
