@@ -79,6 +79,19 @@ up to 8 % better.
 **Against a full-covariance filter** trained on the same calibration pulses, the
 low-rank model needs far fewer pulses.
 
+On **real NIST TES data** distributed with MASS (one dominant line, held-out half),
+`paper/realdata/run_realdata.py` measures FWHM as a fraction of the line energy:
+
+| Estimator | FWHM |
+|---|---|
+| OF | 0.46 % |
+| OF + phase + robust projector decorrelation | 0.29 % |
+| **this work** | **0.28 %** |
+| baseline-noise limit | 0.22 % |
+
+`PhaseEqualizer` removes the sampling-phase bias of arrival times without labels,
+given about 10^5 records per energy.
+
 See `paper/` for the full study and `paper/PRIOR_ART.md` for the prior-art review.
 
 ## Paper

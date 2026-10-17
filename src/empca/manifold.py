@@ -35,6 +35,12 @@ from scipy.interpolate import BSpline
 __all__ = ["PulseManifold"]
 
 
+def _weighted_quantile(x, w, q):
+    order = np.argsort(x)
+    cw = np.cumsum(w[order])
+    return x[order][np.searchsorted(cw, q * cw[-1])]
+
+
 class PulseManifold:
     """One-dimensional pulse manifold (smooth curve through the origin).
 
@@ -51,37 +57,67 @@ class PulseManifold:
         curve is continued along its tangent.
     grid_size : int
         Size of the coarse grid used to initialise each projection.
+    min_free_per_knot : int
+        When clusters are given and fewer than ``min_free_per_knot`` records per
+        spline coefficient lie *outside* the clusters, the data cannot determine
+        the curvature between lines.  The curve is then the secant through the
+        origin and the cluster means (``mode_ = "secant"``), the learned analogue
+        of the tangent filter.  Otherwise ``mode_ = "spline"``.
     """
 
-    def __init__(self, n_knots=16, penalty="gcv", end_quantile=0.995, grid_size=4096):
+    def __init__(self, n_knots=16, penalty="gcv", end_quantile=0.995, grid_size=4096,
+                 min_free_per_knot=30):
+        self.min_free_per_knot = min_free_per_knot
         self.n_knots = n_knots
         self.penalty = penalty
         self.end_quantile = end_quantile
         self.grid_size = grid_size
 
     # ---------------------------------------------------------------- fit
-    def fit(self, A):
-        """Fit the manifold to whitened, aligned coefficients ``A`` (n, K)."""
-        A = np.atleast_2d(np.asarray(A, float))
-        Rt = np.linalg.svd(A, full_matrices=False)[2]
+    def fit(self, A, groups=None):
+        """Fit the manifold to whitened, aligned coefficients ``A`` (n, K).
+
+        ``groups`` (optional, one int per row, ``-1`` = none) marks records that
+        belong to mono-energetic clusters.  Such clusters enter the curve fit only
+        through their mean (with weight equal to their size): their internal
+        scatter is, by definition, not along the energy direction and must not
+        bend the curve (see the identifiability discussion in the paper).
+        """
+        A_all = np.atleast_2d(np.asarray(A, float))
+        A, wts = A_all, np.ones(len(A_all))
+        if groups is not None:
+            groups = np.asarray(groups)
+            free = groups < 0
+            labels = np.unique(groups[~free])
+            A = np.vstack([A_all[free]] + [A_all[groups == g].mean(0, keepdims=True) for g in labels])
+            wts = np.r_[np.ones(free.sum()), [np.sum(groups == g) for g in labels]].astype(float)
+        Rt = np.linalg.svd(A * np.sqrt(wts)[:, None], full_matrices=False)[2]
         if np.median(A @ Rt[0]) < 0:
             Rt[0] = -Rt[0]
         self.rotation_ = Rt  # rows: e, then the K-1 orthogonal directions
         Z = A @ Rt.T
         u, w = Z[:, 0], Z[:, 1:]
-        self.u_max_ = np.quantile(u, self.end_quantile)
+        self.u_max_ = _weighted_quantile(u, wts, self.end_quantile)
+        n_free = np.sum((wts == 1) & (u > 0) & (u <= self.u_max_))
+        if groups is not None and n_free < self.min_free_per_knot * (self.n_knots + 4):
+            self._fit_secant(u[wts > 1], w[wts > 1])
+            self._build_arclength()
+            self.s_, self.distance_ = self.project(A_all, return_distance=True)
+            return self
+        self.mode_ = "spline"
         k = 3
         inner = np.linspace(0.0, self.u_max_, self.n_knots + 2)
         self._t = np.r_[[0.0] * k, inner, [self.u_max_] * k]
         nb = len(self._t) - k - 1
         keep = (u > 0) & (u <= self.u_max_)
-        uk = u[keep]
-        Phi = BSpline.design_matrix(uk, self._t, k).toarray() * uk[:, None]
+        uk, sw = u[keep], np.sqrt(wts[keep])[:, None]
+        Phi = BSpline.design_matrix(uk, self._t, k).toarray() * uk[:, None] * sw
+        Wk = w[keep] * sw
         D2 = np.diff(np.eye(nb), 2, axis=0)
-        PtP, PtW, P2 = Phi.T @ Phi, Phi.T @ w[keep], D2.T @ D2
+        PtP, PtW, P2 = Phi.T @ Phi, Phi.T @ Wk, D2.T @ D2
         base = np.trace(PtP) / np.trace(P2)
         if self.penalty == "gcv":
-            ww = np.sum(w[keep] ** 2)
+            ww = np.sum(Wk ** 2)
             best = None
             for lam in base * np.logspace(-9, 2, 23):
                 Minv = np.linalg.inv(PtP + lam * P2)
@@ -97,8 +133,32 @@ class PulseManifold:
         self._h = [BSpline(self._t, coef, k, extrapolate=False)]
         self._h += [self._h[0].derivative(1), self._h[0].derivative(2)]
         self._build_arclength()
-        self.s_, self.distance_ = self.project(A, return_distance=True)
+        self.s_, self.distance_ = self.project(A_all, return_distance=True)
         return self
+
+    def _fit_secant(self, ug, wg):
+        """Curve through the origin and the cluster means: c = [u, u h(u)] with h
+        piecewise linear between the cluster slopes w_g / u_g (constant outside)."""
+        self.mode_ = "secant"
+        self.lambda_ = np.nan
+        order = np.argsort(ug)
+        ug, hg = ug[order], wg[order] / ug[order, None]
+        self.u_max_ = ug[-1]
+        ux = np.r_[0.0, ug]
+        hv = np.vstack([hg[:1], hg])
+        slopes = np.diff(hv, axis=0) / np.maximum(np.diff(ux), 1e-12)[:, None]
+
+        def h0(x):
+            return np.stack([np.interp(x, ux, hv[:, j]) for j in range(hv.shape[1])], 1)
+
+        def h1(x):
+            i = np.clip(np.searchsorted(ux, x, side="right") - 1, 0, len(slopes) - 1)
+            return slopes[i]
+
+        def h2(x):
+            return np.zeros((np.size(x), hv.shape[1]))
+
+        self._h = [h0, h1, h2]
 
     # ------------------------------------------------------ curve in u
     def _curve_u(self, u, deriv=0):

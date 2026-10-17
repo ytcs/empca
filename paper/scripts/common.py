@@ -104,7 +104,7 @@ def trained(scenario="morph", K=4, Kn=8):
     from empca import (LowRankNoise, ManifoldFitter, PulseManifold, ShiftInvariantPCA,
                        StationaryNoise, find_clusters)
     from empca.shifts import shift_rfft
-    path = os.path.join(DATA, f"models_{scenario}_K{K}_Kn{Kn}_inc.pkl")
+    path = os.path.join(DATA, f"models_{scenario}_K{K}_Kn{Kn}_v3.pkl")
     if os.path.exists(path):
         with open(path, "rb") as f:
             return pickle.load(f)
@@ -112,6 +112,11 @@ def trained(scenario="morph", K=4, Kn=8):
     noise = StationaryNoise.from_records(D["noise"])
     pca = ShiftInvariantPCA(K, n_align=1, max_shift=8, snr_min=30.0).fit(D["train"], noise)
     man = PulseManifold().fit(pca.coeffs_)
+    fit0 = ManifoldFitter(noise, pca.basis_, man)
+    s, t0, _ = fit0.fit(D["train"], man.s_, pca.t0_)
+    # second pass (as in PulseProcessor): clusters enter the curve only via their means
+    groups, _ = find_clusters(s, len(TRAIN_LINES))
+    man = PulseManifold().fit(pca.coeffs_, groups=groups)
     fit0 = ManifoldFitter(noise, pca.basis_, man)
     s, t0, _ = fit0.fit(D["train"], man.s_, pca.t0_)
     n = noise.n_samples

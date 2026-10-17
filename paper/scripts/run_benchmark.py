@@ -31,6 +31,11 @@ def stage_ab(D, noise, K):
     man = PulseManifold().fit(pca.coeffs_)
     fit0 = ManifoldFitter(noise, pca.basis_, man)
     s, t0, _ = fit0.fit(D["train"], man.s_, pca.t0_)
+    # second pass (as in PulseProcessor): clusters enter the curve only via their means
+    groups, _ = find_clusters(s, len(TRAIN_LINES))
+    man = PulseManifold().fit(pca.coeffs_, groups=groups)
+    fit0 = ManifoldFitter(noise, pca.basis_, man)
+    s, t0, _ = fit0.fit(D["train"], man.s_, pca.t0_)
     return pca, man, fit0, s, t0
 
 

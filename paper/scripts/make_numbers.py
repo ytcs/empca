@@ -50,7 +50,27 @@ def main():
     best_n = np.min([fw(Rn, b) for b in BASE], axis=0)
     imp_m = 100 * (1 - lines / best_m)
     imp_n = 100 * (1 - lines_n / best_n)
+    RD = load_json("realdata.json")
+    real_best = min(RD["OF + phase"]["fwhm"], RD["OF + phase + projectors"]["fwhm"])
+    TE = load_json("timing_equalize.json")
+    te_hi = TE[-1]
+    n_max = max(int(k) for k in te_hi["after"])
     macros = dict(
+        realOF=fmt(RD["OF"]["fwhm"], 3), realPhase=fmt(RD["OF + phase"]["fwhm"], 3),
+        realDecor=fmt(RD["OF + phase + projectors"]["fwhm"], 3),
+        realStat=fmt(RD["ML stationary"]["fwhm"], 3), realOurs=fmt(RD["ML Woodbury (lines)"]["fwhm"], 3),
+        realOursErr=fmt(RD["ML Woodbury (lines)"]["err"], 3),
+        realLimit=fmt(RD["baseline_limit"]["fwhm"], 3),
+        realImpBest=fmt(100 * (1 - RD["ML Woodbury (lines)"]["fwhm"] / real_best), 0),
+        realImpOF=fmt(100 * (1 - RD["ML Woodbury (lines)"]["fwhm"] / RD["OF"]["fwhm"]), 0),
+        realNtest=str(RD["n_test_line"]), realNtrain=str(RD["n_train_line"]),
+        realOursEV=fmt(6 * RD["ML Woodbury (lines)"]["fwhm"], 2),
+        realPhaseEV=fmt(6 * RD["OF + phase"]["fwhm"], 2),
+        eqBefore=fmt(te_hi["jitter"] * 5e3, 1), eqAfter=fmt(te_hi["after"][str(n_max)] * 5e3, 1),
+        eqCRB=fmt(te_hi["crb"] * 5e3, 1), eqNmax=f"{n_max:,}".replace(",", "\\,"),
+        eqAfterLow=fmt(TE[0]["after"][str(n_max)] * 5e3, 1), eqBeforeLow=fmt(TE[0]["jitter"] * 5e3, 1),
+        eqCRBLow=fmt(TE[0]["crb"] * 5e3, 1),
+        eqAfterSmall=fmt(te_hi["after"][str(min(int(k) for k in te_hi["after"]))] * 5e3, 1),
         resPracticeHi=fmt(fw(R, "OF + phase + projectors")[-1]),
         resPhaseHiNoMorph=fmt(fw(Rn, "OF + phase")[-1]),
         resCovarHi=fmt(fw(R, "Covariance filter")[-1]),

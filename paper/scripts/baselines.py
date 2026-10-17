@@ -82,15 +82,26 @@ class PracticeBaselines:
         self.hw = hw
         Xa = aligned(self.noise, X[use], tau[use])
         Rr = Xa - A[use, None] * hw
-        w, U = np.linalg.eigh(Rr.T @ Rr / len(Rr))
+        # practitioner-style outlier cut (pile-up, glitches) on the residual norm
+        rn = np.sum(Rr * Rr, axis=1)
+        med = np.median(rn)
+        clean = rn < med + 5 * 1.4826 * np.median(np.abs(rn - med))
+        w, U = np.linalg.eigh(Rr[clean].T @ Rr[clean] / clean.sum())
         self.V = U[:, np.argsort(w)[::-1][: self.n_proj]].T
         F = self._features(Xa, A[use], tau[use])
         cd = []
         lab_u = lab[use]
         for i in range(len(self.lines)):
-            m = lab_u == i
+            m = (lab_u == i) & clean
             Fm = F[m] - F[m].mean(0)
-            cd.append(np.linalg.lstsq(Fm, A[use][m] - A[use][m].mean(), rcond=None)[0])
+            y = A[use][m] - A[use][m].mean()
+            keep = np.ones(m.sum(), bool)
+            for _ in range(5):  # iteratively trimmed least squares (robust to pile-up)
+                beta = np.linalg.lstsq(Fm[keep], y[keep], rcond=None)[0]
+                r = y - Fm @ beta
+                sd = 1.4826 * np.median(np.abs(r - np.median(r)))
+                keep = np.abs(r - np.median(r)) < 3 * sd
+            cd.append(beta)
         self.c_decor = np.array(cd)
         # --- piecewise-linear pulse curve and per-line covariances (whitened domain)
         mus, Ws = [np.zeros(self.noise.n_samples)], [np.eye(self.noise.n_samples)]

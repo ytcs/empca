@@ -76,6 +76,12 @@ No public code from ECHo, HOLMES, CUORE/CUPID or Ricochet was found.
 
 ## To verify before submission (full text needed)
 
+These checks are still open. The build environment's network policy blocks the
+publisher and preprint hosts: arxiv.org, export.arxiv.org, ntrs.nasa.gov,
+api.crossref.org, api.openalex.org, Semantic Scholar, OSTI, INSPIRE and
+web.archive.org were all refused. Adding those hosts to the environment's
+allowed domains, or reading the papers directly, closes items 1-4.
+
 1. Fixsen 2014: whether the covariances were estimated at photon-number peaks, and how
    arc length is used.
 2. SuperCDMS non-stationary OF and Albakry 2026: confirm there is no low-rank or Woodbury form.

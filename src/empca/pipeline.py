@@ -98,6 +98,13 @@ class PulseProcessor:
         self.line_centers_ = groups = None
         if self.n_lines:
             groups, self.line_centers_ = find_clusters(s, self.n_lines)
+            # second pass of Stage B: clusters constrain the curve only through
+            # their means, so intra-line scatter cannot tilt the energy tangent
+            self.manifold_ = PulseManifold(**self.manifold).fit(self.pca_.coeffs_, groups=groups)
+            self.stationary_fitter_ = ManifoldFitter(noise, self.pca_.basis_, self.manifold_)
+            s, t0, _ = self.stationary_fitter_.fit(traces, self.manifold_.s_, self.pca_.t0_,
+                                                   n_iter=self.n_newton)
+            groups, self.line_centers_ = find_clusters(s, self.n_lines)
         if self.covariance is not None:
             Xa = self._aligned(traces, t0)
             if self.covariance == "lines":

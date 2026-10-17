@@ -22,12 +22,13 @@ from .noise import StationaryNoise
 from .pipeline import PulseFit, PulseProcessor
 from .shifts import shift
 from .sipca import ShiftInvariantPCA
+from .timing import PhaseEqualizer
 
 __version__ = "1.0.0"
 
 __all__ = [
     "PulseProcessor", "PulseFit", "ShiftInvariantPCA", "PulseManifold", "ManifoldFitter",
     "LowRankNoise", "StationaryNoise", "OptimalFilter", "EnergyCalibration",
-    "find_lines", "find_clusters", "line_resolution", "shift",
+    "find_lines", "find_clusters", "line_resolution", "shift", "PhaseEqualizer",
     "EMPCA", "ti_rfft", "ti_irfft",
 ]
