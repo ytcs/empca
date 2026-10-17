@@ -64,7 +64,7 @@ class LowRankNoise:
         self.s_min = s_min
         self.floor = floor
 
-    def fit(self, residuals, s, groups=None):
+    def fit(self, residuals, s, groups=None, include=None):
         """Estimate ``V`` and ``Sigma(s)`` from aligned whitened residuals (n, N).
 
         Parameters
@@ -82,6 +82,13 @@ class LowRankNoise:
             knot of ``Sigma(s)`` at its median ``s`` and residuals are taken
             about the cluster mean.  Without groups, quantile bins in ``s`` are
             used and the residuals are used as given.
+        include : ndarray (K_s, N), optional
+            Orthonormal directions that are always part of the model, normally
+            the signal basis ``B``.  ``Sigma`` is then estimated on
+            ``span(include)`` plus ``n_modes`` residual modes orthogonal to it, so
+            the covariance *within* the pulse-shape subspace -- which contains
+            the energy tangent, and where the in-pulse noise may be below
+            baseline -- is modelled in full.
         """
         residuals = np.asarray(residuals, float)
         s = np.asarray(s, float)
@@ -97,6 +104,10 @@ class LowRankNoise:
             edges = np.quantile(s_, np.linspace(0, 1, self.n_bins + 1))
             g_ = np.clip(np.searchsorted(edges, s_, side="right") - 1, 0, self.n_bins - 1)
         C = R.T @ R / len(R)
+        if include is not None:
+            Inc = np.atleast_2d(include)
+            P = np.eye(C.shape[0]) - Inc.T @ Inc
+            C = P @ C @ P
         evals, evecs = np.linalg.eigh(C)
         if self.select == "kl":
             # Gaussian likelihood gain of a mode with variance ratio lam: lam - 1 - log(lam);
@@ -108,15 +119,18 @@ class LowRankNoise:
         order = np.argsort(score)[::-1][: self.n_modes]
         self.V_ = evecs[:, order].T
         self.pooled_eigenvalues_ = evals[order]
-        Z = R @ self.V_.T  # mode amplitudes (n, K_n)
+        if include is not None:
+            self.V_ = np.vstack([Inc, self.V_])
+        K = self.V_.shape[0]
+        Z = R @ self.V_.T  # mode amplitudes (n, K)
 
-        centers, sig = [0.0], [np.zeros((self.n_modes, self.n_modes))]
+        centers, sig = [0.0], [np.zeros((K, K))]
         for g in np.unique(g_):
             m = g_ == g
-            if m.sum() < 4 * self.n_modes:
+            if m.sum() < 4 * K:
                 continue
             centers.append(np.median(s_[m]))
-            sig.append(Z[m].T @ Z[m] / m.sum() - np.eye(self.n_modes))
+            sig.append(Z[m].T @ Z[m] / m.sum() - np.eye(K))
         order = np.argsort(centers)
         centers = [centers[i] for i in order]
         sig = [sig[i] for i in order]

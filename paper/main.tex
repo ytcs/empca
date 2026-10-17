@@ -67,14 +67,19 @@ can be identified from mono-energetic clusters, whose energies need not be known
 On a physical Euler--Maruyama simulation of a saturating TES, with the model
 learned on one spectrum and tested on lines at different energies, the estimator
 reaches \resLinesLo--\resLinesHi\,eV FWHM from 1 to 11\,keV when the absorber
-thermalisation time varies by $\pm2\%$, against \resOFLo--\resOFHi\,eV for the
-optimal filter. This is within \oracleGap\,eV of a per-line oracle Gaussian model.
-Without that morphology variation, the optimal filter is already close to optimal
-and the gain shrinks to at most \gainMaxNoMorph{}: most of the large improvement
-comes from modelling shape fluctuations, not from the non-linearity itself.
-Without morphology variation, arrival times reach the Cramér--Rao bound once a
-deterministic sampling-phase bias is removed. That bias is the remaining timing
-limitation. We discuss which claims of
+thermalisation time varies by $\pm2\%$, against \resOFLo--\resOFHi\,eV for a
+fixed-template optimal filter. Most of that gap is also closed by a well-tuned chain
+of empirical corrections. We therefore compare against four prior-art pipelines:
+phase-corrected OF, OF with residual-projector decorrelation, a tangent (secant)
+filter and an energy-dependent full-covariance filter. Our estimator matches the
+best of them at low energy and improves on it by up to \impBestTopMorph\% at
+11\,keV (\impBestTopNoMorph\% without morphology variation). It agrees with a
+per-line oracle Gaussian model to within \oracleGap\,eV. The full-covariance filter,
+trained on the same $\sim$1700 pulses per line, is limited by its covariance
+estimates (\resCovarHi\,eV at 11\,keV), which shows the data efficiency of the
+low-rank model. Without morphology variation, arrival times reach the
+Cramér--Rao bound once a deterministic sampling-phase bias is removed. That bias is
+the remaining timing limitation. We discuss which claims of
 calibration independence survive: the manifold and the noise model are learned
 without labels, but mapping the manifold coordinate to absolute energy still
 requires reference lines. An open-source Python implementation accompanies the
@@ -99,53 +104,129 @@ from the baseline noise. Arrival times are continuous, which leads to sampling-p
 (``arrival-time'') effects~\cite{Fowler2016practice}. Position-dependent
 thermalisation adds shape variation that is not a function of energy.
 
-Two lines of work have attacked these problems. Physics- or calibration-based
-non-linear filters fit energy-dependent templates and use energy-dependent,
-non-stationary covariances~\cite{Fixsen2004,Shank2014,Fixsen2014,Fowler2018nonlinear}.
-Fixsen \emph{et al.}~\cite{Fixsen2014} gave this a differential-geometric
-interpretation: the noise-free pulses form a curve in record space and the optimal
-estimate is a projection onto that curve under the local noise metric. These
-methods rely on calibrated templates (from a physical model or a multi-photon
-calibration source), and the time-domain non-stationary covariance costs
-$\mathcal O(N^3)$ to factorise for every energy. Data-driven methods use principal
-component analysis (PCA) of the records~\cite{deVries2016,Yan2016,Fowler2020rpca,Yu2019}.
-In earlier work~\cite{Yu2019} we proposed a template-free estimator based on a
-weighted EM-PCA~\cite{Roweis1998,Bailey2012} of a phase-differenced Fourier
-transform that is invariant to arrival time. That construction has two weaknesses.
-It discards arrival-time information by design. Its pulse-height estimator, the
-norm of the coefficient vector, is rectified: it is biased upward at low
-signal-to-noise ratio, like the amplitude of a Rician variable.
+Three lines of work address these effects. \emph{Calibration-based non-linear and
+non-stationary filters} estimate energy-dependent templates and full covariance
+matrices at calibration energies and interpolate between
+them~\cite{Fixsen2002,Fixsen2004,Shank2014,Fixsen2014,Peille2016}. Fixsen
+\emph{et al.}~\cite{Fixsen2014} gave this a differential-geometric interpretation, and
+Fowler \emph{et al.}~\cite{Fowler2017tangent} showed that filtering along the
+\emph{tangent} of the energy curve of mean pulses improves on the OF. These methods
+are the most accurate known. Their full-rank covariances, however, cost
+$\mathcal O(N^3)$ per energy and need many calibration pulses, a burden that led
+the Athena X-IFU study to judge them impractical~\cite{Peille2016}. \emph{Empirical
+corrections} applied to the OF output are the practitioner's standard. They include
+arrival-phase and drift corrections~\cite{Fowler2016practice} and decorrelation
+against residual ``projector'' components, as implemented in NIST's MASS
+software~\cite{mass}. In dark-matter detectors, pulse-shape variation is treated as
+non-stationary noise added to the OF covariance~\cite{CDMSlite2018,Albakry2026}.
+\emph{Data-driven subspace methods} use principal component analysis (PCA) or
+singular value decomposition (SVD) of the
+records~\cite{deVries2016,Yan2016,Busch2016,Alpert2016,Fowler2018nonlinear,Fowler2020rpca,Miller2021,Yu2019}
+and, more recently, neural networks~\cite{Ichinohe2022,Albakry2026}. In earlier
+work~\cite{Yu2019} we proposed a template-free estimator based on a weighted
+EM-PCA~\cite{Roweis1998,Bailey2012} of a phase-differenced Fourier transform that is
+invariant to arrival time. That construction discards arrival-time information by
+design, and its pulse-height estimator, the norm of the coefficient vector, is
+rectified at low signal-to-noise ratio.
 
-This paper presents a successor that keeps the template-free spirit of
-Ref.~\cite{Yu2019} and replaces each heuristic with a likelihood-based component.
-The contributions are:
+This paper combines the three lines into one likelihood. It learns the pulse family
+from unlabelled data, as the subspace methods do. It models energy-dependent,
+non-stationary noise and shape fluctuations, as the calibration-based filters do,
+but with a low-rank parameterisation that is cheap to evaluate and needs few
+calibration pulses. It replaces the empirical corrections with a joint
+energy--time likelihood. \Cref{sec:related} positions each component against
+prior work. The contributions are:
 \begin{enumerate}
 \item \textbf{Shift-invariant whitened PCA} (\cref{sec:stageA}). We show that the
 symmetric spectral whitening operator $R_0^{-1/2}$ commutes with fractional Fourier
 shifts, whereas a Cholesky factor of the Toeplitz covariance does not
 (\cref{lem:commute}). In the whitened domain, alignment (E-step) and subspace
-learning (M-step) are then exact operations on the data. We prove monotone
-convergence (\cref{prop:monotone}) and show that the noise does not bias the learned
-subspace (\cref{prop:unbiased}). We also identify a degeneracy: a subspace that
-contains the time derivative of the pulse carries no timing information
-(\cref{prop:derivative}).
-\item \textbf{Arc-length spline manifold} (\cref{sec:stageB}). The aligned
-coefficients are fitted by a cubic P-spline graph through the origin. In whitened
-arc length $s$, the Fisher information of $s$ is one, and $s$ is unbiased at zero
-energy, which removes the rectification of the coefficient norm (\cref{prop:rician}).
-\item \textbf{Woodbury-accelerated non-stationary ML} (\cref{sec:stageC}). With a
-low-rank, energy-dependent excess covariance, the exact non-stationary
-log-likelihood reduces to $K_b\ll N$ dimensions (\cref{thm:woodbury}). We prove an
-identifiability result (\cref{prop:identifiability}): fluctuations along the
-manifold tangent cannot be learned from unlabelled continuum events, but can be
-learned from mono-energetic clusters, without knowing their energies.
-\item \textbf{A physical simulation study} (\cref{sec:sim,sec:results}) based on an
-Euler--Maruyama integration of the electro-thermal Langevin equations of a
-saturating TES, with held-out test lines. We compare against the OF and the PCA
-norm, and against Cramér--Rao bounds and an oracle Gaussian model.
+learning (M-step) of a transformation-invariant EM~\cite{FreyJojic2003} become
+exact operations at sub-sample resolution. We prove monotone convergence
+(\cref{prop:monotone}) and show that the noise does not bias the learned subspace
+(\cref{prop:unbiased}). We also prove that a subspace containing the time
+derivative of the pulse carries no timing information (\cref{prop:derivative}).
+\item \textbf{Arc-length spline manifold} (\cref{sec:stageB}). A data-driven
+realisation of the energy curve of
+Refs.~\cite{Fixsen2014,Fowler2017tangent,Fowler2018nonlinear}: a P-spline graph
+through the origin in whitened coefficient space, parameterised by whitened arc
+length. In that parameter the Fisher information is one, and the estimate is
+unbiased at zero energy (\cref{prop:rician}).
+\item \textbf{Low-rank, Woodbury-accelerated non-stationary ML} (\cref{sec:stageC}).
+We use an energy-dependent covariance on the signal subspace plus a few
+learned residual modes. With it, the exact non-stationary log-likelihood reduces to
+$K_b\ll N$ dimensions (\cref{thm:woodbury}), as for low-rank Gaussian processes in
+pulsar timing~\cite{vanHaasteren2014,Lentati2017}. We prove an identifiability
+result (\cref{prop:identifiability}): fluctuations along the manifold tangent
+cannot be learned from unlabelled continuum events, but can be learned from
+mono-energetic clusters, without knowing their energies.
+\item \textbf{A physical simulation study} (\cref{sec:sim,sec:results}) of a
+saturating TES, with held-out test lines. We compare against the OF, against OF
+with phase correction and residual-projector decorrelation (the practitioner's
+standard), against a stationary secant (tangent) filter, against an
+energy-dependent full-covariance filter, and against an oracle Gaussian model.
 \item \textbf{Open-source software}: a tested Python package with a
 scikit-learn-like interface (\cref{app:software}).
 \end{enumerate}
+
+%==========================================================================
+\section{Related work}
+\label{sec:related}
+
+\paragraph{Shift-invariant subspace learning.} Jointly inferring per-sample shifts
+and learning components by EM is established in machine learning, as
+transformation-invariant clustering and factor analysis with FFT-computed
+shifts~\cite{FreyJojic2003,Kannan2002}. In neuroimaging it appears as shift-invariant
+decompositions with frequency-domain delays~\cite{Morup2008}. In functional data
+analysis it is registration combined with PCA~\cite{KneipRamsay2008}, and in
+cryo-electron microscopy it is multi-reference alignment~\cite{Sigworth1998}. Among
+microcalorimeter methods, Ref.~\cite{Yu2019} linearised the shift in a
+phase-differenced Fourier domain instead of estimating it. NIST's MASS
+builds SVD ``projector'' bases in which the arrival time enters as a derivative
+component~\cite{mass,Fowler2016practice,Fowler2020rpca}. Alpert
+\emph{et al.}~\cite{Alpert2016} built an SVD single-pulse model with sub-sample
+arrival times for pile-up rejection. We found no microcalorimeter method that
+alternates sub-sample alignment with re-learning a noise-whitened basis. Our
+additions to the generic algorithm are the whitening that makes it exact
+(\cref{lem:commute}), continuous shifts and the timing degeneracy of
+\cref{prop:derivative}.
+
+\paragraph{Energy curves and manifolds.} The pulse family of a non-linear detector
+is a curve in record space~\cite{Fixsen2014}. Tangent filtering uses its local
+tangent from energy-specific mean pulses~\cite{Fowler2017tangent}. Fowler
+\emph{et al.}~\cite{Fowler2018nonlinear} fitted cubic splines to linear-subspace
+components as functions of an energy estimator. Yan \emph{et al.}~\cite{Yan2016} and
+Miller \emph{et al.}~\cite{Miller2021} mapped PCA coefficients to energy with the
+help of calibration lines. Our curve is learned without labels as a graph through
+the origin in \emph{whitened} coefficient space. Its whitened arc length equals the
+cumulative matched-filter SNR, which gives the parameter a statistical meaning
+(unit Fisher information) and makes the low-energy estimate unbiased.
+
+\paragraph{Non-stationary noise.} Energy-dependent full covariances in a least-squares
+fit go back to Fixsen \emph{et al.}~\cite{Fixsen2002,Fixsen2004}, with simulated
+covariances in Ref.~\cite{Shank2014} and calibration-line covariances interpolated in
+energy in Athena's SIRENA software~\cite{Peille2016}. SuperCDMS add the covariance of
+template residuals, aligned to the arrival time, to the noise~\cite{CDMSlite2018},
+and treat the shape uncertainty of PCA templates as non-stationary
+noise~\cite{Albakry2026}. These covariances are full-rank, or their modes are fitted
+as free amplitudes. A white-plus-low-rank covariance evaluated with the Woodbury
+identity and the determinant lemma is standard for Gaussian-process noise in
+pulsar timing~\cite{vanHaasteren2014}. Lentati \emph{et al.}~\cite{Lentati2017} fit
+arrival times jointly with stochastic profile variations, and Moore and
+Gair~\cite{MooreGair2014} marginalise waveform-model error as a covariance in
+gravitational-wave inference. To our knowledge, a learned, low-rank, continuous
+$\Sigma(E)$ inside a joint energy--time likelihood has not been used for
+cryogenic detectors. Nor have we found the identifiability statement of
+\cref{prop:identifiability}, although its geometry is that of
+Refs.~\cite{Fixsen2014,Fowler2017tangent}.
+
+\paragraph{Software.} The most complete open practitioner pipelines are NIST's
+MASS (whitened OF, projectors, phase and drift corrections)~\cite{mass} and
+SuperCDMS's QETpy (OF variants, including non-linear and multi-template
+filters)~\cite{qetpy}. SIRENA implements the covariance-matrix methods of
+Ref.~\cite{Peille2016}. None implements the alternating shift-invariant learning, the
+whitened arc-length manifold or the low-rank joint likelihood. A detailed survey is
+included with the code (\texttt{paper/PRIOR\_ART.md}).
 
 %==========================================================================
 \section{Signal model and notation}
@@ -387,8 +468,14 @@ covariance. In the whitened frame aligned to the pulse,
 \yw \sim \mathcal N\!\left(\Sh{\tau}\vect\mu(s),\; I+\Sh{\tau}V^\T\Sigma(s)V\Sh{\tau}^\T\right),
 \label{eq:ns-model}
 \end{equation}
-with $V\in\R^{K_n\times N}$ orthonormal noise modes and $\Sigma(s)$ a symmetric
-$K_n\times K_n$ matrix with $\Sigma(0)=0$ and eigenvalues $>-1$. In the raw domain,
+with $V\in\R^{K_v\times N}$ orthonormal and $\Sigma(s)$ a symmetric $K_v\times K_v$
+matrix with $\Sigma(0)=0$ and eigenvalues $>-1$. We take
+$V=\left[\begin{smallmatrix}B\\V_r\end{smallmatrix}\right]$: the signal basis plus
+$K_n$ residual modes $V_r$ orthogonal to it, so that $K_v=K+K_n$. Including $B$
+matters. The energy tangent $B^\T\vect c'(s)$ lies in $\operatorname{span}(B)$, and
+the in-pulse noise along these directions can differ from baseline in either sign.
+A model built only from the largest residual modes misses this
+(\cref{sec:results}). In the raw domain,
 using \cref{lem:commute}, this is
 \begin{equation}
 R(E,t_0)=R_0+\Sh{t_0}\,G\,\Sigma(E)\,G^\T\,\Sh{t_0}^\T,\qquad G=R_0^{1/2}V^\T ,
@@ -431,18 +518,20 @@ $V(\Sh{-\tau}\yw-\vect\mu)=Q^\T(\vect x-\vect m)$.
 The aligned projections $\vect x(\tau)$ cost $\mathcal O(K_b N\log N)$ for all
 integer lags at once, or $\mathcal O(K_bN)$ at one continuous $\tau$ with its first
 two derivatives (\cref{eq:xcorr}). The rest of~\eqref{eq:woodbury} costs
-$\mathcal O(K_bK_n+K_n^3)$ per $(s,\tau)$. A dense non-stationary filter instead
+$\mathcal O(K_bK_v+K_v^3)$ per $(s,\tau)$. A dense non-stationary filter instead
 needs an $\mathcal O(N^3)$ factorisation of $R(E,t_0)$ for every energy, and for
 every $t_0$ if the shift is applied to the covariance. Alternatively it can
-precompute inverses on a grid at $\mathcal O(N^2)$ memory per node. Here $K_b\le
-K+K_n\approx 12$ for $N=1024$.
+precompute inverses on a grid at $\mathcal O(N^2)$ memory per node. Here $K_b=K_v=K+K_n\approx 12$,
+against $N=1024$.
 
 \subsection{Learning $V$ and $\Sigma(s)$ and what is identifiable}
 \label{sec:identifiability}
 Given Stage A/B estimates $(\hat s_j,\hat\tau_j)$, the aligned whitened records
-$\vect z_j=\Sh{-\hat\tau_j}\yw^{(j)}$ supply residuals. We take $V$ as the top-$K_n$
-eigenvectors of the pooled residual covariance. $\Sigma$ is estimated at knots
-$s_b$ as $V\widehat{\operatorname{Cov}}_b(\vect z)V^\T-I$, with $\Sigma(0)=0$, and
+$\vect z_j=\Sh{-\hat\tau_j}\yw^{(j)}$ supply residuals. We take $V_r$ as the top-$K_n$
+eigenvectors of the pooled residual covariance projected onto the complement of
+$\operatorname{span}(B)$. $\Sigma$ is estimated at knots $s_b$ as
+$V\widehat{\operatorname{Cov}}_b(\vect z)V^\T-I$, a $K_v\times K_v$ matrix that is
+well determined from a few hundred events, with $\Sigma(0)=0$, and
 interpolated with a monotone cubic (PCHIP) per entry, with eigenvalues clipped at
 $-\frac12$. The definition of the residual matters.
 
@@ -651,45 +740,57 @@ scale), with the line knots.}
 
 \subsection{Energy resolution}
 \Cref{fig:resolution} and \cref{tab:fwhm} summarise the energy resolution on the
-held-out test lines. In scenario (a), the OF degrades from \resOFLo{} to
-\resOFHi\,eV between 1 and 11\,keV, and the PCA norm behaves similarly. The
-stationary manifold ML removes the template-mismatch penalty, reaching
-\resStatHi\,eV at 11\,keV. Its resolution is then limited by the tangential part of
-the rise-time and sampling-phase fluctuations. As
-\cref{prop:identifiability} predicts, the label-free Woodbury variant leaves this
-limit essentially unchanged. The line-aware Woodbury ML removes it and reaches
-\resLinesLo--\resLinesHi\,eV, an improvement over the OF of \gainLo{} at 1\,keV,
-\gainMid{} at 6.5\,keV and \gainHi{} at 11\,keV. It agrees with the oracle local
-Gaussian model to within \oracleGap\,eV at every test line. That oracle uses the
-test line's own covariance; ours is interpolated from training lines at other
-energies. Scenario (b), where only non-linearity and non-stationary noise remain, is
-sobering. The OF is already good (\resOFHiNoMorph\,eV at 11\,keV against
-\resLinesHiNoMorph\,eV for the line-aware ML), and the gain is at most
-\gainMaxNoMorph. A one-parameter family of shapes is handled well by a single
-template plus a non-linear gain curve. The efficiency loss is only the cosine
-between template and local tangent. The stationary manifold ML is even slightly
-\emph{worse} than the OF at the highest energies (\resStatHiNoMorph\,eV). Its
-projection direction, the local tangent, is more exposed to the tangential part of
-the sampling-phase modes than the OF template is. The line-aware covariance removes
-this exposure. In short, the large gains in scenario (a) come from modelling shape
-fluctuations, which a fixed template cannot do. They do not come from the
-non-linearity as such.
+held-out test lines.
 
-The learned-model CRBs lie slightly \emph{above} the achieved widths, so they are
-not bounds on the physical process. The stationary CRB assumes baseline noise
-along the manifold tangent. In the simulation the noise during the pulse is lower
-than baseline, for the electro-thermal reason of \cref{fig:pulses}(d). At 1\,keV
-the achieved width implies a tangential noise variance of about 0.87 of baseline.
-The variance-ranked low-rank model adds excess variance (the rise-time and
-sampling-phase modes) but does not represent these directions of reduced variance,
-so its CRB is, if anything, larger than the stationary one. Ranking modes by the
-likelihood gain captures some of the reduction when it is pooled over many events
-(see the ablation). On the $\sim$700 events of half a line, however, it overfits
-the small sample eigenvalues of the Marchenko--Pastur bulk and degrades the
-oracle badly. We therefore use the oracle (same model class, $K_n=8$
-variance-ranked modes, estimated on the test line itself) as the practical
-reference. Our estimator, which interpolates $\Sigma(s)$ from training lines at
-other energies, reaches it.
+\paragraph{Against the plain optimal filter.} In scenario (a), the OF degrades from
+\resOFLo{} to \resOFHi\,eV between 1 and 11\,keV, and the PCA norm behaves
+similarly. The stationary manifold ML removes the template-mismatch penalty and
+reaches \resStatHi\,eV at 11\,keV. Its resolution is then limited by the tangential
+part of the rise-time and sampling-phase fluctuations. As
+\cref{prop:identifiability} predicts, the label-free Woodbury variant leaves this
+limit unchanged. The line-aware Woodbury ML removes it and reaches
+\resLinesLo--\resLinesHi\,eV, a factor of \gainLo{} to \gainHi{} better than the OF.
+It agrees with the oracle local Gaussian model to within \oracleGap\,eV at every
+test line. That oracle uses the test line's own covariance; ours is interpolated
+from training lines at other energies.
+
+\paragraph{Against prior-art pipelines.} The comparison with a plain OF overstates
+the practical gain. The practitioner's correction chain recovers most of it: OF,
+phase correction, and per-line linear decorrelation against residual projectors,
+interpolated in energy. That chain reaches \resPracticeHi\,eV at 11\,keV in
+scenario (a). In scenario (b), phase correction alone is the best baseline
+(\resPhaseHiNoMorph\,eV). Against the best of the four baselines at each line, our
+estimator is level at low energy and better by \impBestLo--\impBestHi\% in
+scenario (a) and \impBestLoNoMorph--\impBestHiNoMorph\% in scenario (b). The
+advantage grows with saturation, where the shape fluctuations, the in-pulse noise
+and the energy tangent interact most. The energy-dependent full-covariance filter
+of Fixsen \emph{et al.} and SIRENA is the most principled baseline. It reaches only
+\resCovarHi\,eV at 11\,keV in (a) and \resCovarHiNoMorph\,eV in (b), even with
+Ledoit--Wolf shrinkage toward the whitened identity. About 1700 pulses per line are
+too few to estimate a $1022$-dimensional covariance, whereas the $K_v\approx12$
+dimensional covariance of our model is well determined. This is the practical
+content of the low-rank parameterisation, beyond its speed. The stationary secant
+filter, a discrete form of tangent filtering, tracks the stationary manifold ML, as
+expected for two estimates of the same curve.
+
+\paragraph{The role of the signal subspace.} A first version of our noise model used
+only the $K_n$ largest residual modes. In scenario (b) it was \emph{worse} than the
+phase-corrected OF at mid energies (2.14 against 2.00\,eV at 6.5\,keV), as was the
+per-line oracle in the same model class. Including the signal basis $B$ in $V$
+(\cref{sec:stageC}) closed the gap: 2.00\,eV at 6.5\,keV and 2.57\,eV at 11\,keV,
+against 2.77\,eV before. In this simulation the in-pulse noise along the
+pulse-shape directions is partly below baseline, for the electro-thermal reason of
+\cref{fig:pulses}(d). A variance-ranked residual model cannot represent this, yet
+it matters directly for the energy tangent. Two alternatives we tested did not
+help. A multiplicative in-pulse noise gain $g(t;E)$ was worse. A full-rank shrunk
+covariance was limited by sampling noise, as described above.
+
+\paragraph{Cramér--Rao bounds.} The CRB of the learned non-stationary model predicts
+the achieved widths to within about $\pm8\%$ in scenario (b) and is conservative by
+up to 13\% at high energy in (a). The stationary CRB is conservative throughout,
+because the in-pulse noise is partly below baseline. These are model-based
+predictions, not strict bounds on the simulated process. The oracle is the practical
+reference.
 
 \begin{figure}[t]
 \centering
@@ -804,14 +905,21 @@ the number of non-stationary modes $K_n$ (right), scenario (a).}
 \section{Discussion}
 \label{sec:discussion}
 
-\paragraph{What the simulations support.} With a $\pm2\%$ thermalisation spread,
-the template-free, line-aware estimator improves the FWHM over a fixed-template OF
-by \gainLo{} to \gainHi{} on held-out lines of a saturating TES. The largest gains
-appear where saturation is strongest. It matches a per-line oracle Gaussian model
-to within \oracleGap\,eV. The low-energy biases of the coefficient norm and of the
-OF with time search are removed. Without morphology variation, timing reaches the
-CRB once a deterministic sampling-phase bias is removed. The non-stationary likelihood costs about as much
-as a stationary filter with $K_b$ templates.
+\paragraph{What the simulations support.} Against a plain fixed-template OF, the
+template-free, line-aware estimator improves the FWHM by \gainLo{} to \gainHi{} on
+held-out lines of a saturating TES with a $\pm2\%$ thermalisation spread. Against the
+best of four prior-art pipelines it is level at low energy and up to
+\impBestTopMorph\% better at the highest energies. It matches a per-line oracle
+Gaussian model to within \oracleGap\,eV and needs far fewer calibration pulses than
+an energy-dependent full-covariance filter. The low-energy biases of the
+coefficient norm and of the OF with time search are removed. Without morphology
+variation, timing reaches the CRB once a deterministic sampling-phase bias is
+removed. The non-stationary likelihood costs about as much as a stationary filter
+with $K_b$ templates. The method's value is therefore less a large resolution gain
+over the best practice than the fact that it reaches and slightly exceeds that
+practice from a single, template-free likelihood. That likelihood also yields
+arrival times, Cramér--Rao predictions and a goodness of fit, without hand-built
+correction stages.
 
 \paragraph{What needs qualification.} Several statements of the original research
 plan have to be weakened. First, ``calibration independence'' holds for the pulse
@@ -823,15 +931,13 @@ shift invariance to be exact (\cref{lem:commute}). Third, the cost of the
 non-stationary likelihood is $\mathcal O(N\log N)$ per record for the transform,
 plus $\mathcal O(K_bN)$ per continuous $(E,t_0)$ evaluation (or
 $\mathcal O(K_b K_n)$ once the projections are tabulated). It is not
-$\mathcal O(N\log N)$ for the inverse itself, which is never formed. Fourth, the CRB of the learned low-rank model is not a bound for the physical
-process. The physical noise is \emph{reduced} during the pulse in directions the
-variance-ranked model does not represent, so the estimator beats that ``bound''.
-A tighter reference needs a better-conditioned estimate of the full in-pulse
-covariance than a few hundred events per energy allow. Fifth, the ``$>2\times$ FWHM improvement in saturated regimes''
-holds only when shape fluctuations such as position dependence or sampling-phase
-effects are present. For a detector whose pulses form a strict one-parameter
-family, a fixed template with a non-linear gain curve loses at most
-\gainMaxNoMorph{} in our simulation. Sixth, sub-sample timing ``locked to the Fisher
+$\mathcal O(N\log N)$ for the inverse itself, which is never formed. Fourth, the CRB of the learned low-rank model is a model-based prediction, accurate
+to roughly 10\% here, not a strict bound on the physical process. Fifth, the ``$>2\times$ FWHM improvement in saturated regimes''
+holds only against a plain OF and only when shape fluctuations such as position
+dependence or sampling-phase effects are present. Against phase correction and
+projector decorrelation, the gain is at most \impBestTopMorph\%. For a detector whose
+pulses form a strict one-parameter family, a fixed template with a non-linear gain
+curve loses at most \gainMaxNoMorph{} in our simulation. Sixth, sub-sample timing ``locked to the Fisher
 limit'' needs a correction of the sampling-phase bias, which we achieved only as an
 oracle.
 
@@ -860,12 +966,15 @@ speed-up.
 \section{Conclusion}
 We have presented a template-free pulse processing chain for non-linear
 microcalorimeters. Its three stages are shift-invariant PCA in the whitened domain,
-an arc-length spline manifold, and a Woodbury-accelerated non-stationary maximum
-likelihood. Each stage is exact in the sense that it optimises a stated likelihood.
-The chain reaches the resolution of an oracle Gaussian model on held-out lines of a
-physically simulated, saturating TES, at the cost of a small bank of templates.
-The open-source implementation is intended to make these methods easy to test on
-real detector data.
+an arc-length spline manifold, and a Woodbury-accelerated, low-rank non-stationary
+maximum likelihood. Each stage optimises a stated likelihood, and each builds on an
+identifiable line of prior work (\cref{sec:related}). On held-out lines of a
+physically simulated, saturating TES, the chain reaches the resolution of an oracle
+Gaussian model. It is level with the best empirical correction chain at low energy
+and up to \impBestTopMorph\% better at high energy, at the cost of a small bank of
+templates and with far fewer calibration pulses than a full-covariance filter. The
+open-source implementation is intended to make these methods easy to test on real
+detector data, which is the necessary next step.
 
 \section*{Data and code availability}
 All code, including the simulator and the scripts that produce every figure and

@@ -94,7 +94,8 @@ def mpl():
 
 # colour-blind-safe categorical palette (Okabe-Ito)
 COLORS = dict(of="#000000", norm="#999999", proj="#56B4E9", stat="#0072B2",
-              curve="#E69F00", lines="#D55E00", crb="#009E73", oracle="#CC79A7")
+              curve="#E69F00", lines="#D55E00", crb="#009E73", oracle="#CC79A7",
+              phase="#999999", decor="#56B4E9", secant="#0072B2", covar="#E69F00")
 
 
 def trained(scenario="morph", K=4, Kn=8):
@@ -103,7 +104,7 @@ def trained(scenario="morph", K=4, Kn=8):
     from empca import (LowRankNoise, ManifoldFitter, PulseManifold, ShiftInvariantPCA,
                        StationaryNoise, find_clusters)
     from empca.shifts import shift_rfft
-    path = os.path.join(DATA, f"models_{scenario}_K{K}_Kn{Kn}.pkl")
+    path = os.path.join(DATA, f"models_{scenario}_K{K}_Kn{Kn}_inc.pkl")
     if os.path.exists(path):
         with open(path, "rb") as f:
             return pickle.load(f)
@@ -116,8 +117,8 @@ def trained(scenario="morph", K=4, Kn=8):
     n = noise.n_samples
     Xa = np.fft.irfft(shift_rfft(noise.whiten_rfft(D["train"]), -t0, n), n=n, axis=1)
     groups, _ = find_clusters(s, len(TRAIN_LINES))
-    lr_lines = LowRankNoise(Kn).fit(Xa, s, groups=groups)
-    lr_curve = LowRankNoise(Kn).fit(Xa - man.curve(s) @ pca.basis_, s)
+    lr_lines = LowRankNoise(Kn).fit(Xa, s, groups=groups, include=pca.basis_)
+    lr_curve = LowRankNoise(Kn).fit(Xa - man.curve(s) @ pca.basis_, s, include=pca.basis_)
     out = dict(noise=noise, pca=pca, man=man, fit0=fit0, s=s, t0=t0, groups=groups,
                lr_lines=lr_lines, lr_curve=lr_curve)
     with open(path, "wb") as f:

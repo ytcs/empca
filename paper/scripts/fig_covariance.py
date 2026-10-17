@@ -29,7 +29,8 @@ ax[0].legend(frameon=False)
 ax[0].set_title("(a) residual covariance spectra", fontsize=8)
 
 # (b) leading modes in the raw domain
-V = M["lr_lines"].V_
+K = pca.basis_.shape[0]
+V = M["lr_lines"].V_[K:]  # residual modes beyond the signal subspace
 t_us = (np.arange(n) - 256) / 200e3 * 1e6
 cols = ["#0072B2", "#D55E00", "#009E73", "#CC79A7"]
 for k in range(4):
@@ -45,8 +46,11 @@ lr = M["lr_lines"]
 sg = np.linspace(0, lr.s_knots_[-1], 300)
 S = lr.sigma(sg)
 for k in range(4):
-    ax[2].plot(sg, S[:, k, k], color=cols[k], label=f"$\\Sigma_{{{k + 1}{k + 1}}}$")
-    ax[2].plot(lr.s_knots_, lr.sigma_knots_[:, k, k], "o", ms=2.5, color=cols[k])
+    j = K + k
+    ax[2].plot(sg, S[:, j, j], color=cols[k], label=f"mode {k + 1}")
+    ax[2].plot(lr.s_knots_, lr.sigma_knots_[:, j, j], "o", ms=2.5, color=cols[k])
+ax[2].plot(sg, np.linalg.eigvalsh(S[:, :K, :K])[:, 0], color="grey", ls=":",
+           label="signal subspace, min. eig.")
 ax[2].set_yscale("symlog", linthresh=1)
 ax[2].set_xlabel("manifold coordinate $s$")
 ax[2].set_ylabel("excess variance")

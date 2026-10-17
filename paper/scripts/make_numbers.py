@@ -44,7 +44,19 @@ def main():
     jm = np.array([x["jitter"] for x in R["ML Woodbury (lines)"]]) * 5e3
     wb = load_json("woodbury_benchmark.json")
     w1024 = [r for r in wb if r["N"] == 1024][0]
+    BASE = ("OF + phase", "OF + phase + projectors", "Secant filter", "Covariance filter")
+    best_m = np.min([fw(R, b) for b in BASE], axis=0)
+    best_n = np.min([fw(Rn, b) for b in BASE], axis=0)
+    imp_m = 100 * (1 - lines / best_m)
+    imp_n = 100 * (1 - lines_n / best_n)
     macros = dict(
+        resPracticeHi=fmt(fw(R, "OF + phase + projectors")[-1]),
+        resPhaseHiNoMorph=fmt(fw(Rn, "OF + phase")[-1]),
+        resCovarHi=fmt(fw(R, "Covariance filter")[-1]),
+        resCovarHiNoMorph=fmt(fw(Rn, "Covariance filter")[-1]),
+        impBestLo=fmt(imp_m.min(), 0), impBestHi=fmt(imp_m.max(), 0),
+        impBestLoNoMorph=fmt(imp_n.min(), 0), impBestHiNoMorph=fmt(imp_n.max(), 0),
+        impBestTopMorph=fmt(imp_m[-1], 0), impBestTopNoMorph=fmt(imp_n[-1], 0),
         resLinesLo=fmt(lines.min()), resLinesHi=fmt(lines.max()),
         resOFLo=fmt(of.min()), resOFHi=fmt(of.max()),
         resStatHi=fmt(stat[-1]),

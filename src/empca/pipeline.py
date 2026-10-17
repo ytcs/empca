@@ -103,10 +103,12 @@ class PulseProcessor:
             if self.covariance == "lines":
                 if groups is None:
                     raise ValueError('covariance="lines" requires n_lines')
-                self.lowrank_ = LowRankNoise(self.n_noise_modes).fit(Xa, s, groups=groups)
+                self.lowrank_ = LowRankNoise(self.n_noise_modes).fit(
+                    Xa, s, groups=groups, include=self.pca_.basis_)
             elif self.covariance == "curve":
                 res = Xa - self.manifold_.curve(s) @ self.pca_.basis_
-                self.lowrank_ = LowRankNoise(self.n_noise_modes).fit(res, s)
+                self.lowrank_ = LowRankNoise(self.n_noise_modes).fit(
+                    res, s, include=self.pca_.basis_)
             else:
                 raise ValueError("covariance must be 'lines', 'curve' or None")
         self.fitter_ = ManifoldFitter(noise, self.pca_.basis_, self.manifold_, self.lowrank_)

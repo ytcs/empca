@@ -16,6 +16,7 @@ from empca import (LowRankNoise, ManifoldFitter, OptimalFilter, PulseManifold,
                    ShiftInvariantPCA, StationaryNoise, find_clusters)
 from empca.calibration import FWHM
 from empca.shifts import shift_rfft
+from baselines import PracticeBaselines
 
 MAX_SHIFT, SNR_MIN = 8, 30.0
 
@@ -36,8 +37,8 @@ def stage_ab(D, noise, K):
 def covariances(D, noise, pca, man, s, t0, Kn):
     Xa = aligned(noise, D["train"], t0)
     groups, _ = find_clusters(s, len(TRAIN_LINES))
-    lr_lines = LowRankNoise(Kn).fit(Xa, s, groups=groups)
-    lr_curve = LowRankNoise(Kn).fit(Xa - man.curve(s) @ pca.basis_, s)
+    lr_lines = LowRankNoise(Kn).fit(Xa, s, groups=groups, include=pca.basis_)
+    lr_curve = LowRankNoise(Kn).fit(Xa - man.curve(s) @ pca.basis_, s, include=pca.basis_)
     return lr_lines, lr_curve, groups
 
 
@@ -108,11 +109,13 @@ def run_scenario(scenario, K=4, Kn=8):
         halves = (np.arange(len(m)) % 2 == 0, np.arange(len(m)) % 2 == 1)
         for tr_, te_ in (halves, halves[::-1]):
             rt = r[tr_] - r[tr_].mean(0)
-            w, U = np.linalg.eigh(rt.T @ rt / len(rt))
-            V = U[:, np.argsort(w)[::-1][:Kn]].T
+            # same model class as the estimator: signal subspace + K_n residual modes
+            Pb = np.eye(n) - pca.basis_.T @ pca.basis_
+            w, U = np.linalg.eigh(Pb @ (rt.T @ rt / len(rt)) @ Pb)
+            V = np.vstack([pca.basis_, U[:, np.argsort(w)[::-1][:Kn]].T])
             Z = rt @ V.T
-            S = Z.T @ Z / len(Z) - np.eye(Kn)
-            Rinv = np.eye(n) - V.T @ (S @ np.linalg.inv(np.eye(Kn) + S)) @ V
+            S = Z.T @ Z / len(Z) - np.eye(len(V))
+            Rinv = np.eye(n) - V.T @ (S @ np.linalg.inv(np.eye(len(V)) + S)) @ V
             F = Dm @ Rinv @ Dm.T
             est[te_] = np.linalg.solve(F, Dm @ Rinv @ r[te_].T)[0]
         g = res["ML stationary"][TEST_LINES.index(e)]["gain"]
@@ -120,6 +123,17 @@ def run_scenario(scenario, K=4, Kn=8):
         _, fw, err = line_resolution(est)
         oracle.append(dict(E=e, fwhm=fw / abs(g), fwhm_err=err / abs(g)))
     res["Oracle local GLS"] = oracle
+
+    # prior-art baselines (trained on the labelled training lines)
+    t = time.time()
+    base = PracticeBaselines(of, noise, TRAIN_LINES).fit(D["train"], D["train_lab"])
+    timing["learn_baselines"] = time.time() - t
+    t = time.time()
+    bout, btau = base.transform(X)
+    timing["baselines (all four)"] = time.time() - t
+    for key, name in (("phase", "OF + phase"), ("decor", "OF + phase + projectors"),
+                      ("secant", "Secant filter"), ("covar", "Covariance filter")):
+        res[name] = evaluate(bout[key], E, lab, TEST_LINES, btau, t0_true)
 
     n_test = len(X)
     rates = {k: n_test / v for k, v in timing.items() if not k.startswith("learn")}
@@ -152,13 +166,25 @@ def ablations(scenario="morph"):
 
 # ------------------------------------------------------------------- figures
 LABELS = {"OF": "Optimal filter (5.9 keV template)", "PCA norm": "PCA coefficient norm",
+          "OF + phase": "OF + phase correction",
+          "OF + phase + projectors": "OF + phase + residual-projector decorrelation",
+          "Secant filter": "Secant (tangent) filter, stationary",
+          "Covariance filter": "Energy-dependent covariance filter",
           "Manifold projection": "Manifold projection (Stage B)",
           "ML stationary": "Manifold ML, stationary noise",
           "ML Woodbury (curve)": "Manifold ML, Woodbury (label-free)",
           "ML Woodbury (lines)": "Manifold ML, Woodbury (line-aware)",
           "Oracle local GLS": "Oracle local Gaussian model"}
 KEYS = {"OF": "of", "PCA norm": "norm", "Manifold projection": "proj", "ML stationary": "stat",
-        "ML Woodbury (curve)": "curve", "ML Woodbury (lines)": "lines", "Oracle local GLS": "oracle"}
+        "ML Woodbury (curve)": "curve", "ML Woodbury (lines)": "lines", "Oracle local GLS": "oracle",
+        "OF + phase": "phase", "OF + phase + projectors": "decor", "Secant filter": "secant",
+        "Covariance filter": "covar"}
+TABLE_ORDER = ("OF", "OF + phase", "OF + phase + projectors", "Secant filter", "Covariance filter",
+               "PCA norm", "Manifold projection", "ML stationary", "ML Woodbury (curve)",
+               "ML Woodbury (lines)", "Oracle local GLS")
+FIG_ORDER = ("OF", "OF + phase", "OF + phase + projectors", "Covariance filter", "ML stationary",
+             "ML Woodbury (lines)", "Oracle local GLS")
+DASHED = ("OF + phase", "OF + phase + projectors", "Covariance filter", "Oracle local GLS")
 
 
 def figures():
@@ -167,22 +193,16 @@ def figures():
     for ax, sc, title in zip(axes, ("morph", "nomorph"), ("(a) with rise-time variation",
                                                          "(b) without rise-time variation")):
         S = load_json(f"benchmark_{sc}.json")
-        for name in ("OF", "PCA norm", "ML stationary", "ML Woodbury (curve)",
-                     "ML Woodbury (lines)", "Oracle local GLS"):
+        for name in FIG_ORDER:
             r = S["results"][name]
             e = np.array([x["E"] for x in r]) / 1e3
             ax.errorbar(e, [x["fwhm"] for x in r], [x["fwhm_err"] for x in r], marker="o", ms=3,
                         color=COLORS[KEYS[name]], label=LABELS[name],
-                        ls="--" if name.startswith("Oracle") else "-", capsize=0)
-        e = np.array([x["E"] for x in S["crb"]]) / 1e3
-        ax.plot(e, [x["stationary"] for x in S["crb"]], color=COLORS["crb"], ls=":",
-                label="CRB, stationary model")
-        ax.plot(e, [x["woodbury"] for x in S["crb"]], color=COLORS["crb"], ls="-.",
-                label="CRB, learned non-stationary model")
+                        ls="--" if name in DASHED else "-", capsize=0)
         ax.set_xlabel("Energy [keV]")
         ax.set_ylabel("FWHM [eV]")
         ax.set_yscale("log")
-        ticks = [1.5, 2, 3, 4, 6, 8, 12] if sc == "morph" else [1.5, 2, 2.5, 3, 3.5]
+        ticks = [1.5, 2, 3, 4, 6, 8, 12] if sc == "morph" else [1.5, 2, 2.5, 3, 3.5, 4]
         ax.set_yticks(ticks)
         ax.set_yticks([], minor=True)
         ax.set_yticklabels([f"{t:g}" for t in ticks])
@@ -254,8 +274,7 @@ def table():
     for sc, cap in (("morph", "with rise-time variation"), ("nomorph", "without rise-time variation")):
         S = load_json(f"benchmark_{sc}.json")
         lines.append(r"\multicolumn{%d}{l}{\emph{Scenario %s}}\\" % (len(TEST_LINES) + 1, cap))
-        for name in ("OF", "PCA norm", "Manifold projection", "ML stationary",
-                     "ML Woodbury (curve)", "ML Woodbury (lines)", "Oracle local GLS"):
+        for name in TABLE_ORDER:
             r = S["results"][name]
             lines.append(LABELS[name] + " & " + " & ".join(f"{x['fwhm']:.2f}" for x in r) + r" \\")
         lines.append("CRB, learned model & " + " & ".join(f"{x['woodbury']:.2f}" for x in S["crb"])

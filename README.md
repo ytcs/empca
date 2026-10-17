@@ -58,16 +58,28 @@ with the optimal filter.
 
 ## Results on a simulated saturating TES (held-out test lines)
 
+FWHM in eV, with ±2 % absorber thermalisation spread. The test lines lie between
+the training lines.
+
 | FWHM [eV] at | 1.0 keV | 3.7 keV | 6.5 keV | 9.0 keV | 11.0 keV |
 |---|---|---|---|---|---|
 | Optimal filter (5.9 keV template) | 2.01 | 4.34 | 7.24 | 9.99 | 12.40 |
-| this work, line-aware Woodbury ML | 1.71 | 1.94 | 2.18 | 2.50 | 2.78 |
-| oracle local Gaussian model | 1.74 | 1.95 | 2.19 | 2.51 | 2.81 |
+| OF + phase correction + residual-projector decorrelation | 1.73 | 1.91 | 2.12 | 2.56 | 3.10 |
+| Energy-dependent full-covariance filter (Fixsen / SIRENA style) | 1.76 | 2.19 | 2.72 | 3.00 | 3.30 |
+| **this work** (line-aware Woodbury ML) | **1.71** | **1.91** | **2.03** | **2.31** | **2.59** |
+| oracle local Gaussian model | 1.74 | 1.92 | 2.05 | 2.31 | 2.57 |
 
-These numbers are for ±2 % absorber thermalisation spread. Without any shape
-fluctuation the optimal filter is already close to optimal, and the gain is at
-most 15 %. See `paper/` for the full study, including the cases where the
-original claims do not hold.
+**Against a plain OF** the gain is large, but most of it is also available from a
+well-tuned empirical correction chain.
+
+**Against the best prior-art baseline** at each line the method is level at low
+energy and up to 16 % better at high energy. With no shape fluctuation at all it is
+up to 8 % better.
+
+**Against a full-covariance filter** trained on the same calibration pulses, the
+low-rank model needs far fewer pulses.
+
+See `paper/` for the full study and `paper/PRIOR_ART.md` for the prior-art review.
 
 ## Paper
 
