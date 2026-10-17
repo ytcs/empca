@@ -54,7 +54,7 @@ ax[2].plot(sg, np.linalg.eigvalsh(S[:, :K, :K])[:, 0], color="grey", ls=":",
 ax[2].set_yscale("symlog", linthresh=1)
 ax[2].set_xlabel("manifold coordinate $s$")
 ax[2].set_ylabel("excess variance")
-ax[2].legend(frameon=False, fontsize=6)
+ax[2].legend(frameon=False, fontsize=5.5, loc="center right")
 ax[2].set_title(r"(c) $\Sigma(s)$ (line-aware)", fontsize=8)
 fig.tight_layout(w_pad=0.6)
 fig.savefig(f"{FIG}/covariance.pdf")

@@ -59,7 +59,7 @@ signal-to-noise ratio and has unit Fisher information. (C) Pulse-correlated nois
 and residual shape fluctuations are modelled as a low-rank, energy-dependent
 covariance $R(E,t_0)=R_0+T_{t_0}\,G\,\Sigma(E)\,G^\T T_{t_0}^\T$. The Woodbury
 identity and the matrix determinant lemma reduce the non-stationary log-likelihood
-to an expression in $K_b\approx 10$ dimensions, evaluated at the cost of a
+to an expression in $K_b\approx 12$ dimensions, evaluated at the cost of a
 stationary filter with $K_b$ templates instead of the $\mathcal O(N^3)$ of a dense
 non-stationary filter. We prove that shape fluctuations along the manifold tangent
 cannot be told apart from energy fluctuations in unlabelled continuum data; they
@@ -716,17 +716,18 @@ of the manifold, coloured by true energy, with the fitted curve.}
 about the cluster means. A few eigenvalues stand far above the Marchenko--Pastur
 edge~\cite{MarchenkoPastur1967} of the noise bulk, so the excess covariance is
 genuinely low-rank. Correlating the mode amplitudes with the simulation truth
-identifies the leading modes. The two largest (pooled eigenvalues
-$\approx$\,295 and 256) are a pair driven by the sampling phase: their amplitudes
-follow $\cos2\pi t_0$ and $\sin2\pi t_0$ with $|r|\approx0.95$. This is the residual
-aliasing of the pulse onset, which no Fourier-shifted template can represent but
-which the low-rank model captures automatically. The next two
-($\approx$\,82 and 4) are driven by the thermalisation parameter $\eta$
-($|r|=0.8$--$0.99$). There are two of them because the direction of the rise-time
-effect rotates with energy. The physical non-stationary noise of
-\cref{fig:pulses}(d) shows up mainly as directions of \emph{reduced} variance
-(pooled eigenvalues $\approx$\,0.4), which a variance-ranked model does not select
-(see the ablation below).
+identifies the leading residual modes outside the signal subspace. The largest
+(pooled eigenvalue $\approx$\,256) follows the sampling phase, $\sin2\pi t_0$, with
+$|r|\approx0.95$. It is half of the aliasing pair of the pulse onset, which no
+Fourier-shifted template can represent; its partner lies largely inside
+$\operatorname{span}(B)$, where the signal-subspace part of $\Sigma$ models it. The
+second ($\approx$\,76) is driven by the thermalisation parameter $\eta$
+($|r|=0.96$--$0.99$), and the third mixes $\eta$ and phase. Beyond these, the
+spectrum is at the Marchenko--Pastur edge. The physical non-stationary noise of
+\cref{fig:pulses}(d) appears as \emph{reduced} variance, partly inside the signal
+subspace. This is why the signal subspace is part of the covariance model
+(\cref{sec:stageC}). Panel (c) shows its smallest eigenvalue falling below baseline
+with energy.
 
 \begin{figure}[t]
 \centering
@@ -760,8 +761,8 @@ phase correction, and per-line linear decorrelation against residual projectors,
 interpolated in energy. That chain reaches \resPracticeHi\,eV at 11\,keV in
 scenario (a). In scenario (b), phase correction alone is the best baseline
 (\resPhaseHiNoMorph\,eV). Against the best of the four baselines at each line, our
-estimator is level at low energy and better by \impBestLo--\impBestHi\% in
-scenario (a) and \impBestLoNoMorph--\impBestHiNoMorph\% in scenario (b). The
+estimator is level at the lowest energies and better by up to \impBestHi\% in
+scenario (a) and \impBestHiNoMorph\% in scenario (b). The
 advantage grows with saturation, where the shape fluctuations, the in-pulse noise
 and the energy tangent interact most. The energy-dependent full-covariance filter
 of Fixsen \emph{et al.} and SIRENA is the most principled baseline. It reaches only
@@ -796,10 +797,11 @@ reference.
 \centering
 \includegraphics[width=\textwidth]{figures/resolution.pdf}
 \caption{Energy resolution (FWHM) on held-out test lines that lie between the
-training lines. (a) With $\pm2\%$ thermalisation-time spread; (b) without. Error
-bars: statistical. Dotted and dash-dotted: CRB of the learned stationary and
-non-stationary models. These are not bounds on the simulated process, whose
-in-pulse noise is partly below baseline (see text).}
+training lines. (a) With $\pm2\%$ thermalisation-time spread; (b) without. Solid:
+plain OF and the methods of this paper. Dashed: prior-art pipelines (phase-corrected
+OF, OF with residual-projector decorrelation, energy-dependent full-covariance
+filter) and the oracle local Gaussian model. Error bars are statistical. The plain
+and phase-corrected OF coincide in (a).}
 \label{fig:resolution}
 \end{figure}
 
@@ -884,14 +886,14 @@ versus \cref{thm:woodbury} ($K_s=4$, $K_n=8$).}
 \Cref{fig:ablation} varies $K$ and $K_n$. The resolution is insensitive to $K$
 between 2 and 8: the manifold is smooth enough that two whitened components
 describe it, and extra components neither help nor hurt.
-With $K_n\le2$ the model holds only the sampling-phase pair and the resolution stays
-at the stationary level. From $K_n=4$, the rise-time mode is included, the
-resolution drops to the oracle value, and adding more modes neither helps nor hurts
-noticeably. We also tried ranking modes by the Gaussian likelihood gain
-$\lambda-1-\log\lambda$ instead of by variance. This keeps directions of
-\emph{reduced} noise ($\lambda\approx0.4$) and improves the highest-energy lines by
-1--4\%, at a cost of about 2\% at low energy. We kept the simpler variance ranking
-as the default.
+With the signal subspace in the covariance, a single residual mode (the
+sampling-phase mode) is not enough. From $K_n=2$, the rise-time mode is included,
+the resolution reaches the oracle value, and adding more modes neither helps nor
+hurts noticeably. Before the signal subspace was included, ranking residual modes by
+the Gaussian likelihood gain $\lambda-1-\log\lambda$ instead of by variance helped by
+1--4\% at the highest energies, because it kept some directions of reduced noise.
+The signal-subspace covariance captures this physics more directly, and we keep
+variance ranking for the residual modes.
 
 \begin{figure}[t]
 \centering

@@ -8,7 +8,8 @@ from empca.simulate import TESSimulator
 
 
 def fmt(x, nd=1):
-    return f"{x:.{nd}f}"
+    out = f"{x:.{nd}f}"
+    return out[1:] if out.startswith("-") and float(out) == 0 else out
 
 
 def main():
