@@ -1,16 +1,90 @@
-# empca
+# empca — template-free optimal pulse processing for microcalorimeters
 
-Python implementation of the algorithm presented in https://arxiv.org/abs/1910.14261. Please cite the paper if you use this library for research.
+`empca` estimates the energy and arrival time of microcalorimeter (TES, MMC, MKID)
+pulses **without a calibrated template**. It stays optimal when pulses saturate
+and change shape, when the noise is non-stationary, and when arrival times jitter
+at the sub-sample level.
 
-## Example Usage
+It is the follow-up to
+[*Template-free Pulse Height Estimation of Microcalorimeter Responses with PCA*](https://arxiv.org/abs/1910.14261)
+(T. C. Yu, 2019). The original frequency-domain EM-PCA is still available as
+`empca.EMPCA`.
 
-``` python
-from empca import *
+| Stage | Class | What it does |
+|---|---|---|
+| — | `StationaryNoise` | noise spectrum and shift-commuting spectral whitening `R0^{-1/2}` |
+| A | `ShiftInvariantPCA` | whitened shift-invariant EM-PCA: phase-coherent cross-correlation E-step (sub-sample Newton), counter-rotated SVD M-step |
+| B | `PulseManifold` | P-spline curve through the origin in the coefficient space, parameterised by whitened arc length (= cumulative matched-filter SNR, unit Fisher information) |
+| C | `LowRankNoise`, `ManifoldFitter` | energy-dependent low-rank covariance `R(E,t0) = R0 + T_t0 G Σ(E) Gᵀ T_t0ᵀ`; joint ML of (E, t0) with Woodbury / determinant-lemma likelihood in `K_b ≈ 12` dimensions, plus Cramér–Rao bounds |
+| — | `PulseProcessor` | scikit-learn-style pipeline chaining all of the above |
+| — | `OptimalFilter` | classical OF with arrival-time search (baseline) |
+| — | `empca.simulate.TESSimulator` | Euler–Maruyama electro-thermal TES simulator (saturation, non-stationary Johnson/phonon noise, position-dependent rise, continuous arrival times) |
 
-X=ti_rfft(traces)         # perform phase-unwrapping FFT for time-shift invariance
-W=np.diag(1/(psd))        # for non-stationary noise use inverse of full CSD matrix as weights
+## Install
 
-_empca=EMPCA(n_comp=3)    # optimal number of components needs to be tuned
-chi2s= _empca.fit(X,W)     
-recon=ti_irfft(_empca.coeff@_empca.eigvec) # reconstructed pulses from fitted amplitudes and templates
+```bash
+pip install -e .            # numpy, scipy
+pip install -e ".[test]"    # + pytest
 ```
+
+## Usage
+
+```python
+from empca import PulseProcessor
+
+proc = PulseProcessor(n_components=4, n_lines=7, n_noise_modes=8)
+proc.fit(train_records, noise_records)           # unlabelled pulses + pulse-free records
+res = proc.transform(records)                    # res.s, res.t0, res.nll
+proc.calibrate(proc.line_centers_, line_energies)  # map manifold coordinate -> eV
+energy = proc.energy(res.s)
+fwhm = proc.resolution(res.s)                    # Cramér–Rao FWHM of the learned model
+template = proc.template(res.s[0])               # noise-free pulse at that energy
+```
+
+`examples/quickstart.py` simulates a saturating TES and compares the result
+with the optimal filter.
+
+### Choosing the covariance model
+
+* `covariance="lines"` (default) learns the non-stationary noise from the
+  mono-energetic clusters it finds in the data. Their energies need not be
+  known. This is the only variant that captures shape fluctuations *along* the
+  manifold, which broaden lines.
+* `covariance="curve"` is fully label-free. It uses residuals about the manifold
+  and so only sees fluctuations orthogonal to it. These matter for weighting and
+  timing, but to first order they do not change the energy estimate (see the
+  identifiability proposition in the paper).
+* `covariance=None` gives the stationary-noise ML fit.
+
+## Results on a simulated saturating TES (held-out test lines)
+
+| FWHM [eV] at | 1.0 keV | 3.7 keV | 6.5 keV | 9.0 keV | 11.0 keV |
+|---|---|---|---|---|---|
+| Optimal filter (5.9 keV template) | 2.01 | 4.34 | 7.24 | 9.99 | 12.40 |
+| this work, line-aware Woodbury ML | 1.71 | 1.94 | 2.18 | 2.50 | 2.78 |
+| oracle local Gaussian model | 1.74 | 1.95 | 2.19 | 2.51 | 2.81 |
+
+These numbers are for ±2 % absorber thermalisation spread. Without any shape
+fluctuation the optimal filter is already close to optimal, and the gain is at
+most 15 %. See `paper/` for the full study, including the cases where the
+original claims do not hold.
+
+## Paper
+
+`paper/` contains the LaTeX manuscript (`main.tex`). `paper/scripts/` regenerates
+every figure, table and quoted number:
+
+```bash
+cd paper
+make data      # simulations + analyses (~30 min, 4 cores)
+make figures   # plots, table and numbers.tex from saved results
+make pdf
+```
+
+## Tests
+
+```bash
+pytest
+```
+
+Please cite the paper if you use this library in research.

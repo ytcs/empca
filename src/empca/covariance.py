@@ -50,10 +50,16 @@ class LowRankNoise:
     floor : float
         Eigenvalues of ``Sigma`` are clipped to ``>= -floor`` (``R_w`` stays
         positive definite for ``floor < 1``).
+    select : {"kl", "variance"}
+        Mode selection from the pooled residual covariance: ``"kl"`` ranks
+        eigenvalues by the Gaussian likelihood gain ``lam - 1 - log(lam)`` and so
+        also keeps directions of *reduced* noise; ``"variance"`` keeps the
+        largest eigenvalues.
     """
 
-    def __init__(self, n_modes=8, n_bins=24, s_min=5.0, floor=0.5):
+    def __init__(self, n_modes=8, n_bins=24, s_min=5.0, floor=0.5, select="variance"):
         self.n_modes = n_modes
+        self.select = select
         self.n_bins = n_bins
         self.s_min = s_min
         self.floor = floor
@@ -92,7 +98,14 @@ class LowRankNoise:
             g_ = np.clip(np.searchsorted(edges, s_, side="right") - 1, 0, self.n_bins - 1)
         C = R.T @ R / len(R)
         evals, evecs = np.linalg.eigh(C)
-        order = np.argsort(evals)[::-1][: self.n_modes]
+        if self.select == "kl":
+            # Gaussian likelihood gain of a mode with variance ratio lam: lam - 1 - log(lam);
+            # selects both excess and *reduced* variance directions (zero modes excluded)
+            lam = np.where(evals > 1e-6, evals, 1.0)
+            score = lam - 1.0 - np.log(lam)
+        else:
+            score = evals
+        order = np.argsort(score)[::-1][: self.n_modes]
         self.V_ = evecs[:, order].T
         self.pooled_eigenvalues_ = evals[order]
         Z = R @ self.V_.T  # mode amplitudes (n, K_n)
@@ -124,13 +137,6 @@ class LowRankNoise:
         """Excess covariance ``Sigma(s)``, shape (len(s), K_n, K_n)."""
         w, U = self.sigma_eig(s)
         return (U * w[:, None, :]) @ np.swapaxes(U, 1, 2)
-
-    def explained_excess(self, residuals, s):
-        """Fraction of the total excess variance captured by the modes, per record."""
-        R = np.asarray(residuals, float)
-        tot = np.sum(R * R, axis=1)
-        cap = np.sum((R @ self.V_.T) ** 2, axis=1)
-        return cap, tot
 
     def dense_covariance(self, s):
         """Dense whitened ``I + V^T Sigma(s) V`` (testing / Fisher information)."""

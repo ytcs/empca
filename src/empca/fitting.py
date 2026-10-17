@@ -21,6 +21,7 @@ than a stationary optimal filter with ``K_b`` templates.
 """
 import numpy as np
 
+from .noise import rfft_weights
 from .shifts import aligned_projections, derivative
 
 __all__ = ["ManifoldFitter"]
@@ -99,7 +100,6 @@ class ManifoldFitter:
         return yy + self._f(x, np.asarray(s, float))
 
     def _power(self, Yh):
-        from .noise import rfft_weights
         return np.sum(np.abs(Yh) ** 2 * rfft_weights(self.n), axis=1) / self.n
 
     def fit(self, traces, s0, tau0, n_iter=12, h=0.05, max_ds=10.0, batch=8192):

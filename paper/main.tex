@@ -1,0 +1,895 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb,amsthm,bm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+\usepackage{cleveref}
+
+\newtheorem{proposition}{Proposition}
+\newtheorem{lemma}{Lemma}
+\newtheorem{theorem}{Theorem}
+\theoremstyle{remark}
+\newtheorem{remark}{Remark}
+
+\newcommand{\T}{\mathsf{T}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\tr}{\operatorname{tr}}
+\newcommand{\vect}[1]{\bm{#1}}
+\newcommand{\Sh}[1]{T_{#1}}
+\newcommand{\yw}{\vect{y}_{\mathrm w}}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator*{\argmin}{arg\,min}
+
+\input{results/numbers.tex}
+
+\title{Template-free optimal pulse processing for saturating microcalorimeters:\\
+shift-invariant whitened PCA manifolds and Woodbury-accelerated\\
+non-stationary maximum-likelihood estimation}
+\author{To Chin Yu}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+The optimal filter used to estimate energies of microcalorimeter pulses assumes a
+fixed template that scales linearly with energy, stationary noise and a known
+arrival time. Transition-edge sensors (TES) and other thermal detectors violate all
+three: pulses change shape as the sensor saturates, the noise changes during the
+pulse, and the arrival time is random at the sub-sample level. We present a
+three-stage estimator that addresses these effects without a calibrated template.
+(A) A shift-invariant principal component analysis in the noise-whitened domain
+learns an orthonormal pulse subspace and sub-sample arrival times by
+classification EM. The E-step is a phase-coherent cross-correlation and the
+M-step is a singular value decomposition of counter-rotated records; both are
+exact because spectral whitening commutes with Fourier shifts. (B) The aligned
+coefficients are fitted by a smooth spline manifold through the origin,
+parameterised by whitened arc length, which equals the cumulative matched-filter
+signal-to-noise ratio and has unit Fisher information. (C) Pulse-correlated noise
+and residual shape fluctuations are modelled as a low-rank, energy-dependent
+covariance $R(E,t_0)=R_0+T_{t_0}\,G\,\Sigma(E)\,G^\T T_{t_0}^\T$. The Woodbury
+identity and the matrix determinant lemma reduce the non-stationary log-likelihood
+to an expression in $K_b\approx 10$ dimensions, evaluated at the cost of a
+stationary filter with $K_b$ templates instead of the $\mathcal O(N^3)$ of a dense
+non-stationary filter. We prove that shape fluctuations along the manifold tangent
+cannot be told apart from energy fluctuations in unlabelled continuum data; they
+can be identified from mono-energetic clusters, whose energies need not be known.
+On a physical Euler--Maruyama simulation of a saturating TES, with the model
+learned on one spectrum and tested on lines at different energies, the estimator
+reaches \resLinesLo--\resLinesHi\,eV FWHM from 1 to 11\,keV when the absorber
+thermalisation time varies by $\pm2\%$, against \resOFLo--\resOFHi\,eV for the
+optimal filter. This is within \oracleGap\,eV of a per-line oracle Gaussian model.
+Without that morphology variation, the optimal filter is already close to optimal
+and the gain shrinks to at most \gainMaxNoMorph{}: most of the large improvement
+comes from modelling shape fluctuations, not from the non-linearity itself.
+Without morphology variation, arrival times reach the Cramér--Rao bound once a
+deterministic sampling-phase bias is removed. That bias is the remaining timing
+limitation. We discuss which claims of
+calibration independence survive: the manifold and the noise model are learned
+without labels, but mapping the manifold coordinate to absolute energy still
+requires reference lines. An open-source Python implementation accompanies the
+paper.
+\end{abstract}
+
+%==========================================================================
+\section{Introduction}
+\label{sec:intro}
+
+Thermal microcalorimeters such as transition-edge sensors (TES), metallic magnetic
+calorimeters and thermal kinetic-inductance detectors reach energy resolutions of a
+few eV at keV energies~\cite{Moseley1984,IrwinHilton2005}. The standard estimator is
+the optimal filter (OF)~\cite{Szymkowiak1993,Fowler2016practice}: a frequency-domain
+matched filter that is the minimum-variance unbiased amplitude estimator if (i) every
+pulse is a scaled copy of one template, (ii) the noise is additive, Gaussian and
+stationary, and (iii) the arrival time is known. Real detectors break each
+assumption. As a TES is driven up its transition, the pulse shape evolves with
+energy and eventually saturates. The Johnson and thermal-fluctuation noise depend on
+the instantaneous resistance and temperature, so the noise during a pulse differs
+from the baseline noise. Arrival times are continuous, which leads to sampling-phase
+(``arrival-time'') effects~\cite{Fowler2016practice}. Position-dependent
+thermalisation adds shape variation that is not a function of energy.
+
+Two lines of work have attacked these problems. Physics- or calibration-based
+non-linear filters fit energy-dependent templates and use energy-dependent,
+non-stationary covariances~\cite{Fixsen2004,Shank2014,Fixsen2014,Fowler2018nonlinear}.
+Fixsen \emph{et al.}~\cite{Fixsen2014} gave this a differential-geometric
+interpretation: the noise-free pulses form a curve in record space and the optimal
+estimate is a projection onto that curve under the local noise metric. These
+methods rely on calibrated templates (from a physical model or a multi-photon
+calibration source), and the time-domain non-stationary covariance costs
+$\mathcal O(N^3)$ to factorise for every energy. Data-driven methods use principal
+component analysis (PCA) of the records~\cite{deVries2016,Yan2016,Fowler2020rpca,Yu2019}.
+In earlier work~\cite{Yu2019} we proposed a template-free estimator based on a
+weighted EM-PCA~\cite{Roweis1998,Bailey2012} of a phase-differenced Fourier
+transform that is invariant to arrival time. That construction has two weaknesses.
+It discards arrival-time information by design. Its pulse-height estimator, the
+norm of the coefficient vector, is rectified: it is biased upward at low
+signal-to-noise ratio, like the amplitude of a Rician variable.
+
+This paper presents a successor that keeps the template-free spirit of
+Ref.~\cite{Yu2019} and replaces each heuristic with a likelihood-based component.
+The contributions are:
+\begin{enumerate}
+\item \textbf{Shift-invariant whitened PCA} (\cref{sec:stageA}). We show that the
+symmetric spectral whitening operator $R_0^{-1/2}$ commutes with fractional Fourier
+shifts, whereas a Cholesky factor of the Toeplitz covariance does not
+(\cref{lem:commute}). In the whitened domain, alignment (E-step) and subspace
+learning (M-step) are then exact operations on the data. We prove monotone
+convergence (\cref{prop:monotone}) and show that the noise does not bias the learned
+subspace (\cref{prop:unbiased}). We also identify a degeneracy: a subspace that
+contains the time derivative of the pulse carries no timing information
+(\cref{prop:derivative}).
+\item \textbf{Arc-length spline manifold} (\cref{sec:stageB}). The aligned
+coefficients are fitted by a cubic P-spline graph through the origin. In whitened
+arc length $s$, the Fisher information of $s$ is one, and $s$ is unbiased at zero
+energy, which removes the rectification of the coefficient norm (\cref{prop:rician}).
+\item \textbf{Woodbury-accelerated non-stationary ML} (\cref{sec:stageC}). With a
+low-rank, energy-dependent excess covariance, the exact non-stationary
+log-likelihood reduces to $K_b\ll N$ dimensions (\cref{thm:woodbury}). We prove an
+identifiability result (\cref{prop:identifiability}): fluctuations along the
+manifold tangent cannot be learned from unlabelled continuum events, but can be
+learned from mono-energetic clusters, without knowing their energies.
+\item \textbf{A physical simulation study} (\cref{sec:sim,sec:results}) based on an
+Euler--Maruyama integration of the electro-thermal Langevin equations of a
+saturating TES, with held-out test lines. We compare against the OF and the PCA
+norm, and against Cramér--Rao bounds and an oracle Gaussian model.
+\item \textbf{Open-source software}: a tested Python package with a
+scikit-learn-like interface (\cref{app:software}).
+\end{enumerate}
+
+%==========================================================================
+\section{Signal model and notation}
+\label{sec:model}
+
+A record $\vect y\in\R^N$ sampled at rate $f_s$ is modelled as
+\begin{equation}
+\vect y = \Sh{t_0}\,\vect m(E,\eta) + \vect n ,
+\label{eq:model}
+\end{equation}
+where $\vect m(E,\eta)$ is the noise-free pulse for deposited energy $E$ and
+nuisance morphology $\eta$ (e.g.\ absorption position), $t_0$ is the arrival time
+in samples, and $\vect n$ is zero-mean Gaussian noise. Let $F$ be the unitary DFT.
+The (band-limited, circular) shift operator is
+\begin{equation}
+\Sh{\tau} = F^{H}\operatorname{diag}\!\left(e^{-2\pi i k\tau/N}\right)F, \qquad
+(\Sh{\tau}\vect x)(t)=x(t-\tau),
+\end{equation}
+with the Nyquist bin removed so that $\Sh\tau$ maps real signals to real signals and
+is orthogonal on the remaining band for any real $\tau$. Its generator is the
+spectral derivative $D=F^H\operatorname{diag}(2\pi i k/N)F$, with
+$\Sh{\tau}=e^{-\tau D}$ and $D^\T=-D$. Baseline noise is approximated by a
+circulant covariance $R_0=F^H\Lambda F$, with $\Lambda=\operatorname{diag}(\lambda_k)$
+estimated from pulse-free records as $\lambda_k=\E|Y_k|^2/N$. This approximation
+is asymptotically equivalent to the Toeplitz covariance~\cite{Gray2006} and is
+standard in OF practice~\cite{Szymkowiak1993}. We exclude the DC bin (baseline
+offset) and the Nyquist bin, which leaves $N-2$ real degrees of freedom.
+
+\begin{lemma}[Whitening commutes with shifts]\label{lem:commute}
+Let $W=R_0^{-1/2}=F^H\Lambda^{-1/2}F$. Then $W\Sh\tau=\Sh\tau W$ for all
+$\tau\in\R$, and $W\vect n$ is white with unit variance on the analysis band. If $G$
+is any other whitening matrix ($GR_0G^\T=I$), then $G=QW$ with $Q$ orthogonal, and
+$G$ commutes with all $\Sh\tau$ if and only if $Q$ is diagonalised by $F$. In
+particular, the inverse Cholesky factor $L_0^{-1}$ of a non-circulant Toeplitz
+$R_0$ does not commute with shifts.
+\end{lemma}
+\begin{proof}
+$W$ and $\Sh\tau$ are both diagonal in the Fourier basis. For the second statement,
+$(GW^{-1})(GW^{-1})^\T=GR_0G^\T=I$, so $Q=GW^{-1}$ is orthogonal, and $Q$ commutes
+with the full family $\{\Sh\tau\}$ iff it is a function of $D$, i.e.\ diagonal in
+$F$. A lower-triangular $L_0^{-1}$ is not circulant unless $R_0$ is diagonal.
+\end{proof}
+
+All subsequent processing works with whitened records $\yw=W\vect y$. A delay of the
+raw record is the same delay of the whitened record, so a shifted pulse remains a
+shifted pulse after whitening. This is the property that makes the methods below
+exact rather than approximate.
+
+%==========================================================================
+\section{Stage A: shift-invariant whitened PCA}
+\label{sec:stageA}
+
+\subsection{Model and objective}
+In the whitened domain we model the pulses of a training set as lying in an unknown
+$K$-dimensional subspace with orthonormal basis $B\in\R^{K\times N}$ ($BB^\T=I$):
+\begin{equation}
+\yw^{(j)} = \Sh{\tau_j} B^\T \vect a_j + \vect\varepsilon_j,
+\qquad \vect\varepsilon_j\sim\mathcal N(0,I).
+\end{equation}
+The amplitudes $\vect a_j$ profile out as $\hat{\vect a}_j=B\Sh{-\tau_j}\yw^{(j)}$.
+The negative log-likelihood is then $\sum_j\|\yw^{(j)}\|^2-J(B,\{\tau_j\})$ with
+captured power
+\begin{equation}
+J(B,\{\tau_j\})=\sum_j \left\|B\,\Sh{-\tau_j}\yw^{(j)}\right\|^2 .
+\label{eq:J}
+\end{equation}
+We maximise $J$ by alternating over the latent shifts and the basis. This is a hard
+(classification) EM, a shift-invariant analogue of EM-PCA~\cite{Roweis1998,TippingBishop1999}.
+
+\subsection{E-step: phase-coherent cross-correlation}
+For fixed $B$, each $\tau_j$ maximises $g_j(\tau)=\|\vect x_j(\tau)\|^2$, where
+$x_{jk}(\tau)=\langle\vect b_k,\Sh{-\tau}\yw^{(j)}\rangle$. Writing $\hat{\cdot}$
+for the real FFT and $w_k\in\{1,2\}$ for the multiplicity of each half-spectrum
+bin,
+\begin{equation}
+x_{jk}(\tau)=\frac1N\sum_{k'} w_{k'}\,\Re\!\left[\overline{\hat b_{k,k'}}\,
+\hat y_{j,k'}\,e^{2\pi i k'\tau/N}\right].
+\label{eq:xcorr}
+\end{equation}
+For all integer lags this is a cross-correlation, computed with one inverse FFT per
+basis vector. The maximum is then refined to sub-sample precision with guarded
+Newton steps on the exact band-limited function~\eqref{eq:xcorr}. Its
+$\tau$-derivatives follow analytically by multiplying the summand by
+$(2\pi i k'/N)^m$, at $\mathcal O(KN)$ cost per step. Unlike up-sampling or
+parabolic interpolation, this optimises the true likelihood, so the estimate
+inherits the asymptotic efficiency of maximum likelihood.
+
+\subsection{M-step: counter-rotation and SVD}
+For fixed $\{\tau_j\}$, $J$ is maximised by the top-$K$ right singular vectors of the
+matrix $X$ whose rows are the counter-rotated records $\Sh{-\tau_j}\yw^{(j)}$. The
+counter-rotation is a phase ramp in the frequency domain. We compute the $N\times N$
+scatter matrix $X^\T X$ and its eigendecomposition.
+
+\begin{proposition}[Whitened noise does not bias the subspace]\label{prop:unbiased}
+If $\yw^{(j)}=\Sh{\tau_j}\vect\mu_j+\vect\varepsilon_j$ with $\vect\varepsilon_j$
+white and the shifts are known, then
+$\E[X^\T X]/n=\frac1n\sum_j\vect\mu_j\vect\mu_j^\T+P$, where $P$ projects onto the
+analysis band. The noise term is isotropic, so the eigenvectors are those of the
+noise-free scatter matrix.
+\end{proposition}
+\begin{proof}
+$\Sh{-\tau_j}$ is orthogonal and commutes with $P$, so
+$\E[\Sh{-\tau_j}\vect\varepsilon_j\vect\varepsilon_j^\T\Sh{-\tau_j}^\T]=P$.
+\end{proof}
+The proposition fails without whitening: coloured noise adds a non-isotropic term
+$R_0$ and tilts the subspace toward the noise-dominated frequencies. With
+\emph{estimated} shifts, low-SNR records are aligned partly to their own noise. This
+is the ``template from noise'' bias known from cryo-electron
+microscopy~\cite{Sigworth1998,Henderson2013}. We therefore learn $B$ only from
+records whose whitened excess power exceeds $\mathrm{SNR}_{\min}^2$. All records
+are still aligned and projected.
+
+\subsection{Convergence, gauge and a timing degeneracy}
+
+\begin{proposition}[Monotonicity]\label{prop:monotone}
+Let the E-step maximise
+$J_r=\sum_j\|B_{1:r}\Sh{-\tau_j}\yw^{(j)}\|^2$ over $\tau_j$ for the leading
+$r\le K$ basis vectors, and let the M-step take the top-$K$ singular vectors. Then
+$J_r$ is non-decreasing over the iterations.
+\end{proposition}
+\begin{proof}
+The E-step maximises $J_r$ for fixed $B$. The top-$r$ right singular vectors
+maximise $\sum_j\|B_{1:r}\vect x_j\|^2$ over all $r$-frames (Ky Fan), and they are
+the first $r$ of the top-$K$ singular vectors.
+\end{proof}
+
+The model is invariant under a common shift
+$(B,\tau_j)\mapsto(\Sh{\delta}B,\tau_j+\delta)$. We fix this gauge by setting the
+median arrival time of the training set to zero after every iteration; this leaves
+$J_r$ unchanged. The choice of $r$ is governed by the following result.
+
+\begin{proposition}[A subspace containing the pulse derivative carries no timing
+information]\label{prop:derivative}
+Let $P_B$ be the projector onto $\operatorname{span}(B)$ and $g(\tau)=\|P_B
+\Sh{-\tau}\vect y\|^2$. At a point where $\vect z=\Sh{-\tau}\vect y\in
+\operatorname{span}(B)$,
+\begin{equation}
+g''(\tau) = -2\,\|(I-P_B)\,D\vect z\|^2 .
+\end{equation}
+The curvature of the profile likelihood in $\tau$, and so the Fisher information
+of the subspace estimator of $t_0$, comes only from the part of the time
+derivative of the pulse that lies \emph{outside} the subspace.
+\end{proposition}
+\begin{proof}
+$\frac{d}{d\tau}\vect z=D\vect z$. Then
+$g'=2\vect z^\T P_BD\vect z$ and
+$g''=2(D\vect z)^\T P_B(D\vect z)+2\vect z^\T P_BD^2\vect z$. With $P_B\vect z=\vect z$
+and $D^\T=-D$, the second term equals $-2\|D\vect z\|^2$, and
+$\|D\vect z\|^2-\|P_BD\vect z\|^2=\|(I-P_B)D\vect z\|^2$.
+\end{proof}
+A free $K$-dimensional subspace learned from jittered data tends to absorb the
+derivative direction, since it explains small shifts linearly, and its E-step then
+becomes ill-posed. We observed exactly this for $K\ge3$ with $r=K$ (timing
+scatter of a full sample). With $r=1$ the alignment uses only the leading,
+mean-pulse direction $\vect b_1$. Since $\langle\vect b_1,D\vect b_1\rangle=0$,
+\cref{prop:derivative} then gives the classical OF timing information
+$a_1^2\|D\vect b_1\|^2$. The remaining $K-1$ directions describe shape variation
+\emph{after} alignment. The final timing estimate comes from the manifold-constrained
+likelihood of Stage C, where the pulse family is one-dimensional and cannot absorb
+shifts.
+
+%==========================================================================
+\section{Stage B: arc-length spline manifold}
+\label{sec:stageB}
+
+\subsection{Representation}
+The aligned coefficients $\vect a_j=B\Sh{-\tau_j}\yw^{(j)}\in\R^K$ have unit
+isotropic noise (\cref{prop:unbiased}) and concentrate near a curve, the image of
+the energy axis. Let $\vect e$ be the leading uncentred principal direction of
+$\{\vect a_j\}$ (the mean-pulse direction), $u=\langle\vect e,\vect a\rangle$, and
+let the columns of $\tilde W$ span the orthogonal complement. We represent the
+curve as the graph
+\begin{equation}
+\vect c(u)=\vect e\,u+\tilde W\,u\,\vect h(u),\qquad \vect h=\text{cubic P-spline},
+\end{equation}
+fitted by penalised least squares~\cite{EilersMarx1996}. The penalty is selected by
+generalised cross-validation~\cite{CravenWahba1979}. Three properties are built in.
+The curve passes through the origin (a zero-energy event is no pulse) and is linear
+for small signals. It is continued linearly for $u<0$ and tangentially beyond the
+data. Being a graph over $u$, it cannot fold back on itself. Free-form principal
+curves~\cite{HastieStuetzle1989}, which we tried first, did fold back in sparse,
+strongly saturated regions.
+
+\subsection{Arc length and the Fisher information}
+We re-parameterise by whitened arc length,
+$s(u)=\int_0^u\|\vect c'(v)\|\,dv$, so that $\|d\vect c/ds\|=1$. Under stationary
+noise with known alignment, $\vect a=\vect c(s)+\vect\varepsilon$ with
+$\vect\varepsilon\sim\mathcal N(0,I_K)$, the Fisher information is
+$I_{ss}=\|d\vect c/ds\|^2=1$, so
+\begin{equation}
+\sigma_s\ge1,\qquad \sigma_E \ge \left|\frac{dE}{ds}\right|,\qquad
+\mathrm{FWHM}_E\ge 2.355\left|\frac{dE}{ds}\right| .
+\end{equation}
+In the linear regime, $\vect c(s)=s\vect e$ and $s=\langle\vect e,\vect a\rangle$ is
+the OF amplitude divided by its baseline resolution, i.e.\ the matched-filter SNR.
+The arc length is therefore the natural generalisation of the OF SNR to evolving
+pulse shapes. The ML estimate given the alignment is the closest point of the curve.
+
+When the arrival time is estimated jointly, $\partial_s\vect\mu=B^\T\vect c'$ and
+$\partial_\tau\vect\mu=-D\vect\mu$ with $\vect\mu=B^\T\vect c(s)$. In the linear
+regime $\langle\vect c',D\vect\mu\rangle\propto\langle\vect b_1,D\vect b_1\rangle=0$
+and energy and time are Fisher-orthogonal. When the shape evolves with energy they
+are not: the cross term is the information-geometric origin of time walk, and the
+CRB on $s$ inflates by $1/(1-\rho^2)$, where $\rho$ is the Fisher correlation
+coefficient. The joint fit of Stage C accounts for this automatically.
+
+\subsection{No rectification at low energy}
+\begin{proposition}[Rectification of the coefficient norm]\label{prop:rician}
+If $\vect a\sim\mathcal N(\vect c,I_K)$ then $\E\|\vect a\|^2=\|\vect c\|^2+K$ and,
+for $\vect c=0$, $\|\vect a\|$ follows a $\chi_K$ distribution with mean
+$\sqrt2\,\Gamma(\frac{K+1}2)/\Gamma(\frac K2)>0$. The manifold coordinate with
+linear continuation through the origin satisfies $\hat s=\langle\vect e,\vect
+a\rangle\sim\mathcal N(0,1)$ for $\vect c=0$, to the extent that the curve is
+straight within a few noise units of the origin, and is unbiased.
+\end{proposition}
+The norm estimator of Ref.~\cite{Yu2019} therefore has an energy-dependent bias of
+order $K/(2\|\vect c\|)$ that vanishes only at high SNR, plus a non-linear response
+near threshold. The manifold coordinate has neither.
+
+\subsection{Energy scale}
+The manifold, and hence $s$, is learned without labels. The map $E(s)$ is monotone
+and, in the linear regime, proportional, but its curvature at high energy cannot be
+recovered from pulse shapes alone. We fit it with a shape-preserving cubic
+interpolant through the origin and the positions of known lines, as for any
+non-linear detector. This is the sense in which the method is template-free but
+not calibration-free.
+
+%==========================================================================
+\section{Stage C: Woodbury-accelerated non-stationary maximum likelihood}
+\label{sec:stageC}
+
+\subsection{Covariance model}
+Pulse-correlated noise has several sources: resistance- and temperature-dependent
+Johnson and phonon noise, residual shape fluctuations such as position dependence,
+and the shape distortion caused by sampling a pulse that is not band-limited at a
+random sub-sample phase. We model all of them by a low-rank, energy-dependent excess
+covariance. In the whitened frame aligned to the pulse,
+\begin{equation}
+\yw \sim \mathcal N\!\left(\Sh{\tau}\vect\mu(s),\; I+\Sh{\tau}V^\T\Sigma(s)V\Sh{\tau}^\T\right),
+\label{eq:ns-model}
+\end{equation}
+with $V\in\R^{K_n\times N}$ orthonormal noise modes and $\Sigma(s)$ a symmetric
+$K_n\times K_n$ matrix with $\Sigma(0)=0$ and eigenvalues $>-1$. In the raw domain,
+using \cref{lem:commute}, this is
+\begin{equation}
+R(E,t_0)=R_0+\Sh{t_0}\,G\,\Sigma(E)\,G^\T\,\Sh{t_0}^\T,\qquad G=R_0^{1/2}V^\T ,
+\end{equation}
+which is the form of the original proposal. Because $\Sh{t_0}$ commutes with $R_0$,
+the Gram matrix $G^\T\Sh{t_0}^\T R_0^{-1}\Sh{t_0}G=VV^\T=I$ does not depend on
+$t_0$. This is why the shift does not spoil the low-rank algebra. Negative
+eigenvalues of $\Sigma$ are allowed: in a saturating TES the noise during a pulse
+can be \emph{lower} than the baseline noise (\cref{sec:results}).
+
+\subsection{Reduction to $K_b$ dimensions}
+\begin{theorem}\label{thm:woodbury}
+Let $\tilde B\in\R^{K_b\times N}$ be an orthonormal basis of
+$\operatorname{span}(B,V)$, $\vect x(\tau)=\tilde B\Sh{-\tau}\yw$,
+$\vect m(s)=\tilde BB^\T\vect c(s)$, $Q=\tilde BV^\T$ and
+$M(s)=\Sigma(s)\,[I+\Sigma(s)]^{-1}$. Then
+\begin{equation}
+-2\log L(s,\tau) = \|\yw\|^2-\|\vect x\|^2+\|\vect x-\vect m\|^2
+-(\vect x-\vect m)^\T QMQ^\T(\vect x-\vect m)+\log\det\!\left(I+\Sigma\right)
++\text{const}.
+\label{eq:woodbury}
+\end{equation}
+\end{theorem}
+\begin{proof}
+Let $U=\Sh{\tau}V^\T$, which has orthonormal columns. The Woodbury
+identity~\cite{Woodbury1950,Hager1989} gives
+$(I+U\Sigma U^\T)^{-1}=I-U(\Sigma^{-1}+I)^{-1}U^\T=I-UMU^\T$; the last form holds
+also for singular $\Sigma$. The determinant lemma gives
+$\det(I+U\Sigma U^\T)=\det(I+\Sigma U^\T U)=\det(I+\Sigma)$. For the residual
+$\vect r=\yw-\Sh\tau\vect\mu$, orthogonality of $\Sh{\tau}$ gives
+$\vect r^\T\vect r=\|\Sh{-\tau}\yw-\vect\mu\|^2$ and
+$U^\T\vect r=V(\Sh{-\tau}\yw-\vect\mu)$. Decompose $\Sh{-\tau}\yw$ into its
+projection $\tilde B^\T\vect x$ and an orthogonal remainder. Since
+$\vect\mu=\tilde B^\T\vect m$ and $V=Q^\T\tilde B$, we get
+$\|\Sh{-\tau}\yw-\vect\mu\|^2=\|\yw\|^2-\|\vect x\|^2+\|\vect x-\vect m\|^2$ and
+$V(\Sh{-\tau}\yw-\vect\mu)=Q^\T(\vect x-\vect m)$.
+\end{proof}
+
+\paragraph{Cost.} Whitening and one real FFT cost $\mathcal O(N\log N)$ per record.
+The aligned projections $\vect x(\tau)$ cost $\mathcal O(K_b N\log N)$ for all
+integer lags at once, or $\mathcal O(K_bN)$ at one continuous $\tau$ with its first
+two derivatives (\cref{eq:xcorr}). The rest of~\eqref{eq:woodbury} costs
+$\mathcal O(K_bK_n+K_n^3)$ per $(s,\tau)$. A dense non-stationary filter instead
+needs an $\mathcal O(N^3)$ factorisation of $R(E,t_0)$ for every energy, and for
+every $t_0$ if the shift is applied to the covariance. Alternatively it can
+precompute inverses on a grid at $\mathcal O(N^2)$ memory per node. Here $K_b\le
+K+K_n\approx 12$ for $N=1024$.
+
+\subsection{Learning $V$ and $\Sigma(s)$ and what is identifiable}
+\label{sec:identifiability}
+Given Stage A/B estimates $(\hat s_j,\hat\tau_j)$, the aligned whitened records
+$\vect z_j=\Sh{-\hat\tau_j}\yw^{(j)}$ supply residuals. We take $V$ as the top-$K_n$
+eigenvectors of the pooled residual covariance. $\Sigma$ is estimated at knots
+$s_b$ as $V\widehat{\operatorname{Cov}}_b(\vect z)V^\T-I$, with $\Sigma(0)=0$, and
+interpolated with a monotone cubic (PCHIP) per entry, with eigenvalues clipped at
+$-\frac12$. The definition of the residual matters.
+
+\begin{proposition}[Tangential fluctuations are not identifiable from continuum
+data]\label{prop:identifiability}
+Let records at energy $E$ fluctuate as $\vect\mu(s)+\xi\,\vect d$ with $\xi$
+zero-mean and $\vect d=\alpha\,\vect\mu'(s)+\vect d_\perp$,
+$\vect d_\perp\perp\vect\mu'(s)$. To first order in $\xi$, the distribution of
+records is the same as that of a model with fluctuation $\xi\vect d_\perp$ and an
+energy distribution $p(s)$ convolved with the law of $\alpha\xi$. If $p$ is unknown
+and smooth (a continuum), the two models cannot be distinguished. If $p$ has atoms
+(mono-energetic lines), the convolution is detectable and $\alpha$ is identified.
+\end{proposition}
+\begin{proof}
+$\vect\mu(s)+\xi\alpha\vect\mu'(s)+\xi\vect d_\perp=\vect\mu(s+\alpha\xi)+\xi\vect
+d_\perp+\mathcal O(\xi^2)$.
+\end{proof}
+Consequently, residuals about the fitted curve, $\vect z_j-B^\T\vect c(\hat s_j)$,
+reveal only $\vect d_\perp$; we call this label-free variant ``curve''. Since
+$\vect d_\perp\perp\vect\mu'$, down-weighting it does not change the energy
+estimate to first order. The ``line-aware'' variant instead takes residuals about
+the mean of each mono-energetic cluster, found as a peak of the histogram of
+$\hat s$. This reveals the full $\vect d$, including the tangential part that
+broadens the line. The resulting ML estimate is the oblique projection along
+$\vect d$ (cf.\ Ref.~\cite{Fixsen2014}). It is a learned, multi-dimensional
+generalisation of the empirical rise-time and arrival-phase corrections used in
+practice~\cite{Fowler2016practice}. No energies are needed for this step, only the
+existence of sharp lines. Lines with a poor peak-to-continuum ratio contaminate the
+cluster covariance with genuine energy spread.
+
+\subsection{Optimisation and Cramér--Rao bounds}
+We maximise~\eqref{eq:woodbury} jointly over $(s,\tau)$ with a Levenberg-damped
+$2\times2$ Newton iteration and backtracking, vectorised over records. Derivatives
+in $\tau$ are analytic, via~\eqref{eq:xcorr}; derivatives in $s$ are central
+differences of the $K_b$-dimensional expression. The iteration starts from the
+Stage A/B estimates. The Fisher information of the learned model
+is~\cite{Kay1993}
+\begin{equation}
+I_{ij}=\partial_i\vect\mu^\T R_w^{-1}\partial_j\vect\mu+\tfrac12\tr\!\left(R_w^{-1}
+\partial_iR_w\,R_w^{-1}\partial_jR_w\right),\quad
+\partial_\tau R_w=-(DV^\T\Sigma V+V^\T\Sigma VD^\T),
+\end{equation}
+with $\partial_s R_w=V^\T\Sigma'(s)V$. We report bounds with and without the
+covariance term, because the latter relies on the exact energy dependence of
+$\Sigma$.
+
+\Cref{alg:pipeline} summarises the procedure.
+
+\begin{algorithm}[t]
+\caption{Template-free optimal pulse processing}\label{alg:pipeline}
+\begin{algorithmic}[1]
+\Require pulse records $\{\vect y_j\}$, pulse-free records, $K$, $K_n$, number of lines
+\State $\lambda_k\gets$ periodogram of pulse-free records; $\yw\gets W\vect y$ \Comment{\cref{lem:commute}}
+\State $B\gets$ top-$K$ SVD of $\{\yw^{(j)}\}$ with $\mathrm{SNR}>\mathrm{SNR}_{\min}$
+\Repeat \Comment{Stage A}
+  \State $\tau_j\gets\argmax_\tau\|B_{1:r}\Sh{-\tau}\yw^{(j)}\|^2$ (FFT lags, then Newton)
+  \State $B\gets$ top-$K$ right singular vectors of $\{\Sh{-\tau_j}\yw^{(j)}\}$; re-gauge
+\Until{$J_r$ converged}
+\State $\vect a_j\gets B\Sh{-\tau_j}\yw^{(j)}$; fit spline graph $\vect c$; $s\gets$ arc length \Comment{Stage B}
+\State $(s_j,\tau_j)\gets$ stationary ML (\cref{eq:woodbury} with $\Sigma=0$)
+\State clusters $\gets$ peaks of $\{s_j\}$; $V,\Sigma(s)\gets$ cluster residual covariances \Comment{Stage C}
+\State $(s_j,\tau_j)\gets\argmin$ \cref{eq:woodbury}; $E_j\gets E(s_j)$ from reference lines
+\end{algorithmic}
+\end{algorithm}
+
+%==========================================================================
+\section{Physical simulation}
+\label{sec:sim}
+
+To test the method on effects that are physical rather than put in by hand, we
+integrate the coupled electro-thermal Langevin equations of a voltage-biased
+one-body TES~\cite{IrwinHilton2005}:
+\begin{align}
+C\,\dot T &= -K\!\left(T^n-T_b^n\right)+I^2R(T)+P_{\rm dep}(t)+\delta P_{\rm ph}-I\,\delta V_J,\\
+L\,\dot I &= V_b-I\left[R_L+R(T)\right]+\delta V_J+\delta V_L,
+\end{align}
+with $R(T)=\tfrac12R_n\{1+\tanh[(T-T_c)/w]\}$. The noise sources are white with
+one-sided spectral densities $4k_BTR(T)$ (TES Johnson), $4k_BT_bR_L$ (shunt Johnson)
+and $4k_BT^2G(T)F$ (thermal link, $G=nKT^{n-1}$). They are evaluated at the
+\emph{instantaneous} $T$ and $R$, so the noise is genuinely non-stationary during a
+pulse. A white SQUID current noise is added at the output. The energy is deposited
+through an absorber thermalisation profile
+$P_{\rm dep}=(E/\tau_{\rm th})e^{-(t-t_0)/\tau_{\rm th}}\Theta(t-t_0)$, integrated
+exactly over each time step so that arrival times are continuous. Position
+dependence enters through $\tau_{\rm th}=\tau_{\rm th,0}(1+\kappa\eta)$ with
+$\eta\sim\mathcal U(-1,1)$. We integrate with the Euler--Maruyama
+method~\cite{KloedenPlaten1992}, using eight sub-steps per output sample and a
+\SI{1}{ms} noise burn-in before every record. The ADC is modelled as a boxcar
+average over each sample period, so the residual aliasing of the pulse onset is
+present, as in a real digitiser. \Cref{tab:params} lists the parameters.
+
+\begin{table}[t]
+\centering
+\caption{Simulation parameters and derived bias-point quantities.}\label{tab:params}
+\begin{tabular}{llll}
+\toprule
+$T_c$, $T_b$ & \SI{100}{mK}, \SI{55}{mK} & $C$, $G(T_c)$, $n$ & \SI{1.2}{pJ/K}, \SI{250}{pW/K}, 3\\
+$w$, $R_n$, $R_0/R_n$ & \SI{1.4}{mK}, \SI{10}{m\ohm}, 0.30 & $R_L$, $L$ & \SI{0.3}{m\ohm}, \SI{40}{nH}\\
+$F$, SQUID noise & 0.6, \SI{6}{pA/\sqrt{Hz}} & $\tau_{\rm th,0}$, $\kappa$ & \SI{12}{\micro s}, 0.02 (0 in scenario~b)\\
+$f_s$, $N$, pre-trigger & \SI{200}{kHz}, 1024, 256 & arrival jitter & $\mathcal U(-2,2)$ samples\\
+\midrule
+$\alpha$, loop gain & \simAlpha, \simLoop & $\tau_{\rm eff}$, $I_0$ & \SI{\simTau}{\micro s}, \SI{\simIzero}{\micro A}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Spectra and evaluation protocol.} Each scenario has a training spectrum
+of $2\times10^4$ unlabelled events: 60\% in lines at 1.5, 3.0, 4.5, 5.9, 8.0, 10.0
+and 12.0\,keV and 40\% in a flat continuum from 0.5 to 13\,keV. A statistically
+independent test spectrum of the same size has lines at 1.0, 2.2, 3.7, 5.0, 6.5,
+7.2, 9.0 and 11.0\,keV, all \emph{between} the training lines. This tests the
+interpolation of the manifold and of $\Sigma(s)$. There are also $3000$ noise
+records. All models are learned on the training set only. To compare estimators
+independently of calibration interpolation, we convert each estimator's line width
+to eV with its own local gain $d\langle\hat x\rangle/dE$. The gain is measured by
+local quadratic regression on the test continuum within $\pm\SI{600}{eV}$ of the
+line. FWHM values are $2.355\times$ the clipped ($4\sigma$) standard deviation.
+Timing jitter is the robust standard deviation of $\hat t_0-t_0$ within each line.
+A common offset (time walk) is removed per line; that offset is a gauge choice
+(\cref{sec:discussion}). The two scenarios are (a) $\kappa=0.02$ (a $\pm2\%$
+thermalisation-time spread) and (b) $\kappa=0$.
+
+\paragraph{Estimators compared.} (1) OF with arrival-time search and a template
+averaged from the 5.9\,keV training line. (2) The norm of the Stage A coefficient
+vector, in the spirit of Ref.~\cite{Yu2019}. (3) Stage B closest-point projection.
+(4) Joint $(s,\tau)$ ML with stationary noise. (5) Woodbury ML with label-free
+(``curve'') covariance. (6) Woodbury ML with line-aware covariance. As references
+we use the CRB of the learned models and an oracle: a local generalised least
+squares estimator whose covariance ($K_n$ modes) is estimated on half of the
+\emph{test} line itself and applied to the other half (cross-fitted). Unless
+stated otherwise, $K=4$, $r=1$, $K_n=8$, $\mathrm{SNR}_{\min}=30$ and a search
+window of $\pm8$ samples.
+
+%==========================================================================
+\section{Results}
+\label{sec:results}
+
+\subsection{Pulses and noise}
+\Cref{fig:pulses} shows the simulated detector. The peak current per unit energy
+falls by a factor of \simPeakDrop{} between 1 and 12\,keV, while the decay
+lengthens. This is the shape evolution that biases and degrades a fixed-template OF.
+Panel (d) shows that the noise variance during the pulse departs strongly from
+baseline. It falls \emph{below} baseline while the sensor is driven up the
+transition: the loop gain and the current responsivity drop, so the same noise
+sources produce less current noise. This is mainly a change of the electro-thermal
+\emph{response}, not of the sources. With the source amplitudes frozen at their
+bias-point values (dotted) the drop is even larger, because the hotter, more
+resistive sensor then no longer partly compensates with larger Johnson and phonon
+noise.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/pulses.pdf}
+\caption{Simulated TES. (a) Mean pulses at 1--12\,keV. (b) The same, normalised,
+showing saturation and the lengthening decay. (c) Baseline noise spectrum. (d) Noise
+variance during the pulse relative to baseline (1500 records per curve), for the
+physical model (solid) and with the noise-source amplitudes frozen at the bias point
+(dotted).}
+\label{fig:pulses}
+\end{figure}
+
+\subsection{Learned subspace and manifold}
+Stage A converged in \sipcaIters{} iterations (\cref{fig:manifold}). The leading
+whitened basis vector is a sharpened mean pulse. The next ones encode the
+lengthening decay and the changing rise, and the fourth vector holds the
+high-frequency structure of the onset. Coloured back with $R_0^{1/2}$, they become
+the mean pulse and its shape-variation modes in current units. The coefficients trace a smooth curve whose
+transverse excursions grow with energy. The spline graph fits it with a GCV-selected
+penalty, and its arc length reaches $s_{\max}=\smax$ (the SNR at about 13\,keV).
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/manifold.pdf}
+\caption{(a) Whitened shift-invariant basis ($K=4$). (b) The same vectors in the raw
+domain. (c, d) Aligned coefficients of the training spectrum in the rotated frame
+of the manifold, coloured by true energy, with the fitted curve.}
+\label{fig:manifold}
+\end{figure}
+
+\subsection{Structure of the pulse-correlated noise}
+\Cref{fig:covariance}(a) shows the eigenvalue spectrum of the residual covariance
+about the cluster means. A few eigenvalues stand far above the Marchenko--Pastur
+edge~\cite{MarchenkoPastur1967} of the noise bulk, so the excess covariance is
+genuinely low-rank. Correlating the mode amplitudes with the simulation truth
+identifies the leading modes. The two largest (pooled eigenvalues
+$\approx$\,295 and 256) are a pair driven by the sampling phase: their amplitudes
+follow $\cos2\pi t_0$ and $\sin2\pi t_0$ with $|r|\approx0.95$. This is the residual
+aliasing of the pulse onset, which no Fourier-shifted template can represent but
+which the low-rank model captures automatically. The next two
+($\approx$\,82 and 4) are driven by the thermalisation parameter $\eta$
+($|r|=0.8$--$0.99$). There are two of them because the direction of the rise-time
+effect rotates with energy. The physical non-stationary noise of
+\cref{fig:pulses}(d) shows up mainly as directions of \emph{reduced} variance
+(pooled eigenvalues $\approx$\,0.4), which a variance-ranked model does not select
+(see the ablation below).
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/covariance.pdf}
+\caption{(a) Eigenvalues of the whitened residual covariance of three training lines;
+dotted: Marchenko--Pastur upper edge for pure noise. (b) Leading noise modes in the
+raw domain. (c) Diagonal of the interpolated excess covariance $\Sigma(s)$ (symlog
+scale), with the line knots.}
+\label{fig:covariance}
+\end{figure}
+
+\subsection{Energy resolution}
+\Cref{fig:resolution} and \cref{tab:fwhm} summarise the energy resolution on the
+held-out test lines. In scenario (a), the OF degrades from \resOFLo{} to
+\resOFHi\,eV between 1 and 11\,keV, and the PCA norm behaves similarly. The
+stationary manifold ML removes the template-mismatch penalty, reaching
+\resStatHi\,eV at 11\,keV. Its resolution is then limited by the tangential part of
+the rise-time and sampling-phase fluctuations. As
+\cref{prop:identifiability} predicts, the label-free Woodbury variant leaves this
+limit essentially unchanged. The line-aware Woodbury ML removes it and reaches
+\resLinesLo--\resLinesHi\,eV, an improvement over the OF of \gainLo{} at 1\,keV,
+\gainMid{} at 6.5\,keV and \gainHi{} at 11\,keV. It agrees with the oracle local
+Gaussian model to within \oracleGap\,eV at every test line. That oracle uses the
+test line's own covariance; ours is interpolated from training lines at other
+energies. Scenario (b), where only non-linearity and non-stationary noise remain, is
+sobering. The OF is already good (\resOFHiNoMorph\,eV at 11\,keV against
+\resLinesHiNoMorph\,eV for the line-aware ML), and the gain is at most
+\gainMaxNoMorph. A one-parameter family of shapes is handled well by a single
+template plus a non-linear gain curve. The efficiency loss is only the cosine
+between template and local tangent. The stationary manifold ML is even slightly
+\emph{worse} than the OF at the highest energies (\resStatHiNoMorph\,eV). Its
+projection direction, the local tangent, is more exposed to the tangential part of
+the sampling-phase modes than the OF template is. The line-aware covariance removes
+this exposure. In short, the large gains in scenario (a) come from modelling shape
+fluctuations, which a fixed template cannot do. They do not come from the
+non-linearity as such.
+
+The learned-model CRBs lie slightly \emph{above} the achieved widths, so they are
+not bounds on the physical process. The stationary CRB assumes baseline noise
+along the manifold tangent. In the simulation the noise during the pulse is lower
+than baseline, for the electro-thermal reason of \cref{fig:pulses}(d). At 1\,keV
+the achieved width implies a tangential noise variance of about 0.87 of baseline.
+The variance-ranked low-rank model adds excess variance (the rise-time and
+sampling-phase modes) but does not represent these directions of reduced variance,
+so its CRB is, if anything, larger than the stationary one. Ranking modes by the
+likelihood gain captures some of the reduction when it is pooled over many events
+(see the ablation). On the $\sim$700 events of half a line, however, it overfits
+the small sample eigenvalues of the Marchenko--Pastur bulk and degrades the
+oracle badly. We therefore use the oracle (same model class, $K_n=8$
+variance-ranked modes, estimated on the test line itself) as the practical
+reference. Our estimator, which interpolates $\Sigma(s)$ from training lines at
+other energies, reaches it.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/resolution.pdf}
+\caption{Energy resolution (FWHM) on held-out test lines that lie between the
+training lines. (a) With $\pm2\%$ thermalisation-time spread; (b) without. Error
+bars: statistical. Dotted and dash-dotted: CRB of the learned stationary and
+non-stationary models. These are not bounds on the simulated process, whose
+in-pulse noise is partly below baseline (see text).}
+\label{fig:resolution}
+\end{figure}
+
+\begin{table}[t]
+\centering
+\caption{FWHM energy resolution [eV] on the held-out test lines.}\label{tab:fwhm}
+\small
+\resizebox{\textwidth}{!}{\input{results/table_fwhm.tex}}
+\end{table}
+
+\subsection{Timing}
+\Cref{fig:timing} compares the arrival-time jitter with the CRB. Without morphology
+variation (b), the jitter equals the CRB at 1\,keV (\jitterLowE\,ns against
+\crbLowE\,ns). At higher energies it levels off at \jitterNoMorphLo--\jitterNoMorphHi\,ns,
+while the bound keeps falling to \crbHi\,ns. The floor is deterministic. Regressing
+the timing error on three harmonics of the \emph{true} sub-sample phase removes it,
+and the remaining jitter is within a factor \jitterPhaseMaxRatio{} of the CRB at
+every line (\jitterPhaseHi\,ns at 11\,keV). The cause is the same residual aliasing
+of the pulse onset that produces the sampling-phase noise modes: a pulse that is not
+band-limited is displaced differently depending on where it falls between samples.
+The low-rank covariance treats these modes as random, which is correct for the
+energy estimate, but the phase-dependent displacement is a \emph{bias} in $t_0$.
+We tried to correct it without labels by equalising the histogram of
+$\hat t_0 \bmod 1$ within bins of $\hat s$ (raw and Fourier-smoothed). This failed
+in our tests: within a bin the energy-dependent walk smears the phase histogram,
+and the correction added more scatter than it removed. A phase-resolved manifold
+$\vect c(s,\varphi)$ is the natural remedy and is left for future work. With
+morphology variation (a), all estimators sit at \jitterMorphLo--\jitterMorphHi\,ns:
+a $\pm2\%$ change of the thermalisation time moves the apparent arrival time by
+more than the noise does. Under shape variation the definition of $t_0$ is itself a
+gauge choice (\cref{sec:discussion}).
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/timing.pdf}
+\caption{Arrival-time jitter per test line (per-line time-walk offset removed;
+$1\,\text{sample}=\SI{5}{\micro s}$). Dashed: line-aware ML after regressing out the
+dependence on the true sub-sample phase (oracle diagnostic). Dotted and dash-dotted:
+CRB of the learned stationary and non-stationary models.}
+\label{fig:timing}
+\end{figure}
+
+\subsection{Low-energy behaviour}
+\Cref{fig:lowenergy} shows the response to events from 0 to 320\,eV. Each estimator
+is calibrated by a quadratic through the origin fitted at 80--320\,eV, because the
+detector is slightly non-linear even there. The coefficient norm is biased upward
+by \normBiasZero\,eV at zero energy, and the bias decays only over the first few
+tens of eV, as \cref{prop:rician} predicts. The OF with an arrival-time search is
+also biased (\ofBiasZero\,eV): maximising the filter output over lags selects
+positive noise excursions. The manifold ML is unbiased (\mlBiasZero\,eV), because
+its search over $\tau$ is symmetric in the sign of $s$. The price is a
+\mlSpreadZero{} wider, bimodal zero-energy distribution, since the free arrival
+time picks the largest $|s|$ of either sign. Above a few eV all
+three have the same spread.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/lowenergy.pdf}
+\caption{(a) Bias of three estimators at low energy. (b) Distribution of the
+estimates for pure-noise records.}
+\label{fig:lowenergy}
+\end{figure}
+
+\subsection{Computational cost}
+\Cref{fig:woodbury} compares the time per likelihood evaluation of the
+$K_b$-dimensional formula~\eqref{eq:woodbury} with a dense Cholesky evaluation of
+the same non-stationary model. The two agree to a relative precision of
+\woodburyPrec{} for all $N$. At $N=1024$ the Woodbury evaluation is
+\woodburySpeedup{} times faster per $(E,t_0)$, and the advantage grows with $N$.
+The full pipeline processes \rateLines{} records/s on one CPU core for the
+line-aware ML, against \rateOF{} for the OF, in our pure-NumPy implementation.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.55\textwidth]{figures/woodbury_timing.pdf}
+\caption{Time per evaluation of the non-stationary log-likelihood: dense Cholesky
+versus \cref{thm:woodbury} ($K_s=4$, $K_n=8$).}
+\label{fig:woodbury}
+\end{figure}
+
+\subsection{Ablations}
+\Cref{fig:ablation} varies $K$ and $K_n$. The resolution is insensitive to $K$
+between 2 and 8: the manifold is smooth enough that two whitened components
+describe it, and extra components neither help nor hurt.
+With $K_n\le2$ the model holds only the sampling-phase pair and the resolution stays
+at the stationary level. From $K_n=4$, the rise-time mode is included, the
+resolution drops to the oracle value, and adding more modes neither helps nor hurts
+noticeably. We also tried ranking modes by the Gaussian likelihood gain
+$\lambda-1-\log\lambda$ instead of by variance. This keeps directions of
+\emph{reduced} noise ($\lambda\approx0.4$) and improves the highest-energy lines by
+1--4\%, at a cost of about 2\% at low energy. We kept the simpler variance ranking
+as the default.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/ablation.pdf}
+\caption{Mean FWHM over the test lines versus the subspace dimension $K$ (left) and
+the number of non-stationary modes $K_n$ (right), scenario (a).}
+\label{fig:ablation}
+\end{figure}
+
+%==========================================================================
+\section{Discussion}
+\label{sec:discussion}
+
+\paragraph{What the simulations support.} With a $\pm2\%$ thermalisation spread,
+the template-free, line-aware estimator improves the FWHM over a fixed-template OF
+by \gainLo{} to \gainHi{} on held-out lines of a saturating TES. The largest gains
+appear where saturation is strongest. It matches a per-line oracle Gaussian model
+to within \oracleGap\,eV. The low-energy biases of the coefficient norm and of the
+OF with time search are removed. Without morphology variation, timing reaches the
+CRB once a deterministic sampling-phase bias is removed. The non-stationary likelihood costs about as much
+as a stationary filter with $K_b$ templates.
+
+\paragraph{What needs qualification.} Several statements of the original research
+plan have to be weakened. First, ``calibration independence'' holds for the pulse
+manifold and for the noise model, which are learned from unlabelled data. The
+absolute energy scale $E(s)$ still needs reference lines, and the tangential part
+of the covariance needs mono-energetic clusters (\cref{prop:identifiability}).
+Second, Cholesky pre-whitening must be replaced by the symmetric spectral root for
+shift invariance to be exact (\cref{lem:commute}). Third, the cost of the
+non-stationary likelihood is $\mathcal O(N\log N)$ per record for the transform,
+plus $\mathcal O(K_bN)$ per continuous $(E,t_0)$ evaluation (or
+$\mathcal O(K_b K_n)$ once the projections are tabulated). It is not
+$\mathcal O(N\log N)$ for the inverse itself, which is never formed. Fourth, the CRB of the learned low-rank model is not a bound for the physical
+process. The physical noise is \emph{reduced} during the pulse in directions the
+variance-ranked model does not represent, so the estimator beats that ``bound''.
+A tighter reference needs a better-conditioned estimate of the full in-pulse
+covariance than a few hundred events per energy allow. Fifth, the ``$>2\times$ FWHM improvement in saturated regimes''
+holds only when shape fluctuations such as position dependence or sampling-phase
+effects are present. For a detector whose pulses form a strict one-parameter
+family, a fixed template with a non-linear gain curve loses at most
+\gainMaxNoMorph{} in our simulation. Sixth, sub-sample timing ``locked to the Fisher
+limit'' needs a correction of the sampling-phase bias, which we achieved only as an
+oracle.
+
+\paragraph{Timing gauge.} With energy-dependent shapes, ``arrival time'' is defined
+only up to an energy-dependent offset $\delta(E)$ (time walk): the reparameterisation
+$\vect\mu(s)\mapsto\Sh{\delta(s)}\vect\mu(s)$, $t_0\mapsto t_0-\delta(s)$ leaves the
+likelihood unchanged. Our gauge aligns the mean-pulse direction. A Fisher-orthogonal
+gauge, in which $\langle\vect\mu',D\vect\mu\rangle=0$, would decorrelate energy and
+time estimates. A physical onset gauge needs an external timing reference. Because
+the noise-free manifold is known, conversion between gauges is a deterministic
+post-processing step.
+
+\paragraph{Limitations and outlook.} Our results are from simulation. The real-data
+tests that matter most are TES arrays with pile-up, gain drift and non-Gaussian tails
+in the shape fluctuations. Pile-up rejection can use the likelihood
+value~\eqref{eq:woodbury} directly. Gain drift enters as a slow reparameterisation
+of $s$ and could be tracked by line centroids. Continuous morphology parameters
+could be estimated explicitly with a two-dimensional manifold
+$\vect c(s,\eta)$; we did not pursue this because the tangential identifiability
+problem applies there too, and the line-aware covariance already reaches the oracle.
+The low-rank model would fail for noise whose non-stationarity is spread over many
+modes. A diagonal-plus-low-rank model in the time domain would keep part of the
+speed-up.
+
+%==========================================================================
+\section{Conclusion}
+We have presented a template-free pulse processing chain for non-linear
+microcalorimeters. Its three stages are shift-invariant PCA in the whitened domain,
+an arc-length spline manifold, and a Woodbury-accelerated non-stationary maximum
+likelihood. Each stage is exact in the sense that it optimises a stated likelihood.
+The chain reaches the resolution of an oracle Gaussian model on held-out lines of a
+physically simulated, saturating TES, at the cost of a small bank of templates.
+The open-source implementation is intended to make these methods easy to test on
+real detector data.
+
+\section*{Data and code availability}
+All code, including the simulator and the scripts that produce every figure and
+number in this paper, is available at \url{https://github.com/ytcs/empca}.
+
+\appendix
+\section{Software}
+\label{app:software}
+The package \texttt{empca} (import name) implements every component as a
+separate, tested class: \texttt{StationaryNoise}, \texttt{ShiftInvariantPCA},
+\texttt{PulseManifold}, \texttt{LowRankNoise}, \texttt{ManifoldFitter} and
+\texttt{OptimalFilter}. A pipeline object chains them:
+\begin{verbatim}
+from empca import PulseProcessor
+proc = PulseProcessor(n_components=4, n_lines=7, n_noise_modes=8)
+proc.fit(train_records, noise_records)        # unlabelled
+res = proc.transform(records)                  # res.s, res.t0, res.nll
+proc.calibrate(proc.line_centers_, line_energies_eV)
+energy = proc.energy(res.s)
+fwhm = proc.resolution(res.s)                  # learned-model CRB
+\end{verbatim}
+The frequency-domain EM-PCA of Ref.~\cite{Yu2019} remains available as
+\texttt{empca.EMPCA}.
+
+\bibliographystyle{unsrtnat}
+\bibliography{refs}
+\end{document}
