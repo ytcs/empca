@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "empca-pulse"
+version = "1.0.0"
+description = "Optimal microcalorimeter pulse processing: shift-invariant whitened PCA, spline manifolds and Woodbury-accelerated non-stationary maximum likelihood"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [{name = "To Chin Yu"}]
+requires-python = ">=3.9"
+dependencies = ["numpy>=1.22", "scipy>=1.8"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Physics",
+    "License :: OSI Approved :: MIT License",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+paper = ["matplotlib"]
+legacy = ["tqdm"]
+
+[project.urls]
+Homepage = "https://github.com/ytcs/empca"
+"Previous paper" = "https://arxiv.org/abs/1910.14261"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,7 +1,12 @@
 import numpy as np
 import scipy
+import scipy.linalg
 from scipy.signal import savgol_filter,wiener
-from tqdm import *
+try:
+    from tqdm import tqdm
+except ImportError:  # tqdm is optional
+    def tqdm(x, *args, **kwargs):
+        return x
 
 
 def polar(x):
