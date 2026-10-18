@@ -12,7 +12,8 @@ Estimators
 ----------
 * OF and the four practitioner baselines, trained on the calibration run.
 * This work, label-free: trained on the science run only (curve covariance).
-* This work, line-aware, trained on the calibration run only.
+* This work, line-aware, trained on the calibration run only (calibration-line
+  identities given, as for the baselines).
 * This work, line-aware, trained on calibration + science runs together
   (science continuum constrains the curve; calibration lines the covariance).
 All energy scales come from the calibration lines.
@@ -87,13 +88,14 @@ def run():
     p = PulseProcessor(covariance="curve", **kw).fit(sci, noise=noise)
     res["This work, label-free (science only)"] = score(
         calibrate(p.transform(cal).s, lab, p.transform(sci).s), Et)
-    # line-aware, calibration run only
-    p = PulseProcessor(covariance="lines", n_lines=len(CAL_LINES), **kw).fit(cal, noise=noise)
+    # line-aware, calibration run only; the calibration-line identities are given,
+    # exactly as for the practitioner baselines
+    p = PulseProcessor(covariance="lines", **kw).fit(cal, noise=noise, groups=lab)
     res["This work, line-aware (calibration run)"] = score(
         calibrate(p.transform(cal).s, lab, p.transform(sci).s), Et)
     # line-aware, calibration + science
-    p = PulseProcessor(covariance="lines", n_lines=len(CAL_LINES), **kw).fit(np.vstack([cal, sci]),
-                                                                            noise=noise)
+    p = PulseProcessor(covariance="lines", **kw).fit(
+        np.vstack([cal, sci]), noise=noise, groups=np.r_[lab, -np.ones(len(sci), int)])
     res["This work, line-aware (calibration + science)"] = score(
         calibrate(p.transform(cal).s, lab, p.transform(sci).s), Et)
     save_json("phonon.json", res)

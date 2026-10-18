@@ -218,21 +218,24 @@ class PhononParameters(TESParameters):
 
     An energy ``E`` deposited at position ``(rho^2, z)`` in the crystal (``rho^2``
     uniform in [0, 1] for a uniform disk, ``z`` the normalised distance from the
-    instrumented face) produces
+    instrumented face) defines a phonon path-length proxy
+    ``d = (rho^2 + z) / 2`` and produces
 
     * an athermal phonon signal collected by the TES with efficiency
-      ``eps = eps0 (1 - k_rho rho^2)(1 - k_z_eps z)`` and collection time
-      ``tau_a = tau_a0 (1 + k_z_tau z)`` (fast, position dependent), and
+      ``eps = eps0 (1 - k_eps d)(1 - k_rho rho^2)`` and collection time
+      ``tau_a = tau_a0 (1 + k_tau d)``: amplitude and shape change together, as
+      for real athermal collection, plus a small amplitude-only radial term
+      ``k_rho`` that no single-channel estimator can separate from energy, and
     * a thermal component: the remaining ``(1 - eps) E`` heats the crystal,
       which relaxes through the TES link ``G_ab`` and the bath link ``G_cb``
       (slow), in the spirit of the two-component model of Proebst et al. (1995).
     """
 
     eps0: float = 0.25
-    k_rho: float = 0.15
-    k_z_eps: float = 0.10
+    k_eps: float = 0.20
+    k_rho: float = 0.01
     tau_a0: float = 20e-6
-    k_z_tau: float = 1.0
+    k_tau: float = 1.0
     C_abs: float = 1.6e-12
     G_ab: float = 50e-12
     G_cb: float = 1.0e-9
@@ -261,8 +264,9 @@ class PhononSimulator(TESSimulator):
 
     def collection(self, rho2, z):
         p = self.p
-        eps = p.eps0 * (1 - p.k_rho * rho2) * (1 - p.k_z_eps * z)
-        return eps, p.tau_a0 * (1 + p.k_z_tau * z)
+        d = 0.5 * (rho2 + z)
+        eps = p.eps0 * (1 - p.k_eps * d) * (1 - p.k_rho * rho2)
+        return eps, p.tau_a0 * (1 + p.k_tau * d)
 
     def simulate(self, energy, rho2=None, z=None, t0=None, batch=4000):
         energy = np.atleast_1d(np.asarray(energy, float))

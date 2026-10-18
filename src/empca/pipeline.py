@@ -84,11 +84,15 @@ class PulseProcessor:
         self.calibration_ = None
 
     # ------------------------------------------------------------------ fit
-    def fit(self, traces, noise_traces=None, noise=None):
+    def fit(self, traces, noise_traces=None, noise=None, groups=None):
         """Learn all model components from unlabelled records.
 
         Provide either pulse-free ``noise_traces`` or a ready ``noise`` model.
+        ``groups`` optionally gives known mono-energetic cluster labels per
+        record (``-1`` = none), e.g. the lines of a calibration source selected
+        by the experimenter; otherwise clusters are found as peaks of ``s``.
         """
+        known_groups = None if groups is None else np.asarray(groups)
         traces = np.atleast_2d(np.asarray(traces, float))
         if noise is None:
             if noise_traces is None:
@@ -103,15 +107,19 @@ class PulseProcessor:
                                                n_iter=self.n_newton)
         self.lowrank_ = None
         self.line_centers_ = groups = None
-        if self.n_lines:
-            groups, self.line_centers_ = find_clusters(s, self.n_lines)
+        if known_groups is not None or self.n_lines:
+            groups = known_groups if known_groups is not None else find_clusters(s, self.n_lines)[0]
             # second pass of Stage B: clusters constrain the curve only through
             # their means, so intra-line scatter cannot tilt the energy tangent
             self.manifold_ = PulseManifold(**self.manifold).fit(self.pca_.coeffs_, groups=groups)
             self.stationary_fitter_ = ManifoldFitter(noise, self.pca_.basis_, self.manifold_)
             s, t0, _ = self.stationary_fitter_.fit(traces, self.manifold_.s_, self.pca_.t0_,
                                                    n_iter=self.n_newton)
-            groups, self.line_centers_ = find_clusters(s, self.n_lines)
+            if known_groups is None:
+                groups, self.line_centers_ = find_clusters(s, self.n_lines)
+            else:
+                self.line_centers_ = np.array([np.median(s[groups == g])
+                                               for g in np.unique(groups[groups >= 0])])
         if self.covariance is not None:
             Xa = self._aligned(traces, t0)
             if self.covariance == "lines":
