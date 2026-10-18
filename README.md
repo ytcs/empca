@@ -73,7 +73,7 @@ the training lines.
 well-tuned empirical correction chain.
 
 **Against the best prior-art baseline** at each line the method is level at low
-energy and up to 16 % better at high energy. With no shape fluctuation at all it is
+energy and up to 17 % better at high energy. With no shape fluctuation at all it is
 up to 8 % better.
 
 **Against a full-covariance filter** trained on the same calibration pulses, the

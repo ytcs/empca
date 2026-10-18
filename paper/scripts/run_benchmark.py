@@ -218,7 +218,7 @@ def figures():
     fig.tight_layout(rect=(0, 0.17, 1, 1))
     fig.savefig(f"{FIG}/resolution.pdf")
 
-    fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.5), sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(7.0, 3.1), sharey=True)
     for ax, sc, title in zip(axes, ("morph", "nomorph"), ("(a) with rise-time variation",
                                                          "(b) without rise-time variation")):
         S = load_json(f"benchmark_{sc}.json")
@@ -243,8 +243,10 @@ def figures():
         ax.set_yscale("log")
         ax.set_title(title, fontsize=8)
     axes[0].set_ylabel(r"Arrival-time jitter $\sigma_{t_0}$ [ns]")
-    axes[1].legend(frameon=False, fontsize=6)
-    fig.tight_layout()
+    h, l = axes[1].get_legend_handles_labels()
+    fig.legend(h, l, loc="lower center", ncol=3, frameon=False, fontsize=6.5,
+               bbox_to_anchor=(0.5, -0.02))
+    fig.tight_layout(rect=(0, 0.17, 1, 1))
     fig.savefig(f"{FIG}/timing.pdf")
 
     try:
