@@ -85,9 +85,14 @@ On **real NIST TES data** distributed with MASS (one dominant line, held-out hal
 | Estimator | FWHM |
 |---|---|
 | OF | 0.46 % |
-| OF + phase + robust projector decorrelation | 0.29 % |
-| **this work** | **0.28 %** |
-| baseline-noise limit | 0.22 % |
+| NIST MASS standard pipeline (ATS filter + drift + phase; in-sample) | **0.254 %** |
+| NIST MASS (5-lag filter + drift + phase; in-sample) | 0.265 % |
+| this work (line-aware, + pre-trigger drift covariate) | 0.262 % |
+| baseline-noise limit | 0.217 % |
+
+On real single-line data the method **matches but does not beat** NIST's own
+pipeline. MASS beats the author's reimplementation of the same corrections, so the
+simulated baselines may understate real practice.
 
 `PhaseEqualizer` removes the sampling-phase bias of arrival times without labels,
 given about 10^5 records per energy.

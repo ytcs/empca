@@ -57,9 +57,9 @@ lines, the estimator reaches \resLinesLo--\resLinesHi\,eV FWHM from 1 to 11\,keV
 against \resOFLo--\resOFHi\,eV for a plain optimal filter. Most of that gap is also
 closed by tuned empirical corrections. Against the best of four prior-art
 pipelines, the estimator is level at low energy and up to \impBestTopMorph\% better
-at 11\,keV, within \oracleGap\,eV of an oracle. On real NIST TES data dominated by
-one line, it improves on phase-corrected filtering with projector decorrelation by
-\realImpBest\%. A label-free sampling-phase correction brings arrival times close to the
+at 11\,keV, within \oracleGap\,eV of an oracle. On real single-line NIST TES data it
+matches, but does not beat, NIST's own MASS pipeline (\realOursDrift\% against
+\realMassATS\% FWHM). A label-free sampling-phase correction brings arrival times close to the
 Cramér--Rao bound, but it needs about $10^5$ records per energy. An
 open-source Python implementation accompanies the paper.
 \end{abstract}
@@ -934,26 +934,40 @@ OF amplitude measured on the off-line tail. Corrections fitted at the line keep 
 OF gain there.
 
 With a single cluster, the manifold is the secant (\cref{sec:stageB}), and the
-stationary ML coincides with the OF (\realStat\% against \realOF\% FWHM). The
-phase-corrected OF reaches \realPhase\%, and adding residual-projector
-decorrelation with a robust (trimmed) fit reaches \realDecor\%. The line-aware
-Woodbury ML reaches \realOurs$\pm$\realOursErr\%: \realImpOF\% better than the OF
-and \realImpBest\% better than the best empirical correction chain, against a
-baseline-noise limit of \realLimit\% (\cref{fig:realdata}). If the line is at
-600\,eV, this is \realOursEV\,eV against \realPhaseEV\,eV for the phase-corrected
-OF. Two lessons came from these data. First, the curve must not be fitted to the
-scatter inside a line. Before the cluster-mean rule was introduced, the spline
-followed the phase-driven scatter and the manifold estimator was four times worse
-than the OF. Second, projector regressions must be robust to pile-up. An ordinary
-least-squares fit made that baseline worse than the plain OF. This single-line set
-does not test the non-linear energy manifold itself. That requires multi-line or
-continuum data.
+stationary ML coincides with the OF (\realStat\% against \realOF\% FWHM). Our
+reimplementations of the empirical corrections reach \realPhase\% (phase
+correction) and \realDecor\% (adding robust residual-projector decorrelation). The
+line-aware Woodbury ML reaches \realOurs$\pm$\realOursErr\%. The decisive comparison
+is against MASS itself, run with its documented standard pipeline: summary and
+cuts, noise, average pulse, filter, drift correction against the pre-trigger mean,
+and entropy-minimising phase correction. MASS fits these corrections on all
+records, so its numbers are in-sample, which can only favour it. With its
+arrival-time-safe (ATS) filter, MASS reaches \realMassATS$\pm$\realMassATSErr\%; with
+the 5-lag filter, \realMassLag\%. MASS's drift correction uses the pre-trigger level,
+which our whitened processing discards. Adding the same information to our
+estimator as a robust, line-learned gain covariate gives
+\realOursDrift$\pm$\realOursDriftErr\%. That is level with the 5-lag MASS pipeline
+and \realMassSigma$\sigma$ behind the ATS pipeline, against a baseline-noise limit of
+\realLimit\% (\cref{fig:realdata}).
+
+On these real single-line data, then, the method matches but does not beat the
+best practice, and MASS's real pipeline outperforms our reimplementation of the
+same corrections. The simulated baselines of \cref{sec:results} were built the same
+way and may understate real practice. We tried to run MASS on the simulated records
+too, but with default settings it did not reproduce even the plain OF resolution, a
+configuration mismatch we did not pursue. Two further lessons came from these data.
+First, the curve must not be fitted to the scatter inside a line. Before the
+cluster-mean rule was introduced, the spline followed the phase-driven scatter and
+the manifold estimator was four times worse than the OF. Second, projector
+regressions must be robust to pile-up. This single-line set does not test the
+non-linear energy manifold itself.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{figures/realdata.pdf}
 \caption{Line width on held-out records of real NIST TES data, as a fraction of
-the line energy. Dotted: baseline-noise limit of the OF.}
+the line energy. MASS: NIST's standard pipeline, corrections fitted in-sample.
+Dotted: baseline-noise limit of the OF.}
 \label{fig:realdata}
 \end{figure}
 
@@ -1033,8 +1047,8 @@ Gaussian model. It is level with the best empirical correction chain at low ener
 and up to \impBestTopMorph\% better at high energy, at the cost of a small bank of
 templates and with far fewer calibration pulses than a full-covariance filter. The
 open-source implementation is intended to make these methods easy to test on real
-detector data. A first test on single-line NIST TES data confirms the gain over the
-best empirical correction chain. Multi-line data from saturating arrays are the
+detector data. A first test on single-line NIST TES data shows it level with, not ahead
+of, NIST's MASS pipeline. Multi-line data from saturating arrays are the
 necessary next step.
 
 \section*{Data and code availability}

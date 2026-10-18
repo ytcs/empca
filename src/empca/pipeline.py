@@ -53,6 +53,12 @@ class PulseProcessor:
         Rank ``K_n`` of the non-stationary excess covariance.
     manifold : dict, optional
         Keyword arguments for :class:`PulseManifold`.
+    drift_samples : int, optional
+        If given, the mean of the first ``drift_samples`` raw samples (the
+        pre-trigger level, which whitening discards) is used as a gain-drift
+        covariate: a multiplicative correction of ``s`` linear in that level is
+        learned robustly on the mono-energetic clusters (as MASS's drift
+        correction does with the pre-trigger mean).
 
     Examples
     --------
@@ -64,7 +70,8 @@ class PulseProcessor:
 
     def __init__(self, n_components=4, n_align=1, max_shift=16, snr_min=None,
                  covariance="lines", n_lines=None, n_noise_modes=8, manifold=None,
-                 n_newton=12):
+                 n_newton=12, drift_samples=None):
+        self.drift_samples = drift_samples
         self.n_components = n_components
         self.n_align = n_align
         self.max_shift = max_shift
@@ -125,8 +132,34 @@ class PulseProcessor:
                 # line positions on the scale of the final estimator
                 self.line_centers_ = np.array([np.median(s[groups == g])
                                                for g in range(len(self.line_centers_))])
+        self.drift_ = None
+        if self.drift_samples and groups is not None:
+            self.drift_ = self._fit_drift(self._pretrigger(traces), s, groups)
         self.s_train_, self.t0_train_ = s, t0
         return self
+
+    def _pretrigger(self, traces):
+        return np.asarray(traces, float)[:, : self.drift_samples].mean(axis=1)
+
+    @staticmethod
+    def _fit_drift(pre, s, groups):
+        """Robust per-cluster slope of s/median(s) against the pre-trigger level."""
+        knots, slopes, ref = [], [], []
+        for g in np.unique(groups[groups >= 0]):
+            m = groups == g
+            x = pre[m] - np.median(pre[m])
+            y = s[m] / np.median(s[m]) - 1
+            keep = np.ones(m.sum(), bool)
+            for _ in range(5):
+                b = np.polyfit(x[keep], y[keep], 1)[0]
+                r = y - b * x
+                sd = 1.4826 * np.median(np.abs(r - np.median(r)))
+                keep = np.abs(r - np.median(r)) < 3 * sd
+            knots.append(np.median(s[m]))
+            slopes.append(b)
+            ref.append(np.median(pre[m]))
+        order = np.argsort(knots)
+        return (np.asarray(knots)[order], np.asarray(slopes)[order], float(np.median(ref)))
 
     def _aligned(self, traces, t0):
         n = self.noise_.n_samples
@@ -142,6 +175,9 @@ class PulseProcessor:
         s, t0, nll = self.stationary_fitter_.fit(traces, s, t0, n_iter=self.n_newton)
         if self.lowrank_ is not None:
             s, t0, nll = self.fitter_.fit(traces, s, t0, n_iter=self.n_newton)
+        if self.drift_ is not None:
+            knots, slopes, ref = self.drift_
+            s = s / (1 + np.interp(s, knots, slopes) * (self._pretrigger(traces) - ref))
         res = PulseFit(s=s, t0=t0, nll=nll, coeffs=a)
         if self.calibration_ is not None:
             res.energy = self.energy(s)

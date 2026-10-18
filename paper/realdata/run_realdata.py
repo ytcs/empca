@@ -46,7 +46,8 @@ def main():
     paths = fetch()
     X, info = read_ljh(paths["pulses"])
     Nz, _ = read_ljh(paths["noise"])
-    X = X - X[:, :450].mean(1, keepdims=True)
+    pre = X[:, :450].mean(1)
+    X = X - pre[:, None]
     Nz = Nz - Nz.mean(1, keepdims=True)
     Nz = Nz[(Nz.max(1) - np.median(Nz, 1)) < 150]           # drop noise records with pulses
     noise = StationaryNoise.from_records(Nz)
@@ -72,14 +73,21 @@ def main():
     # extrapolation is not defined with a single line), so no tail regression
     res["OF + phase"] = width(bout["phase"], gain=1.0)
     res["OF + phase + projectors"] = width(bout["decor"], gain=1.0)
-    for cov, name in ((None, "ML stationary"), ("lines", "ML Woodbury (lines)")):
+    Xraw = X + pre[:, None]  # raw records keep the pre-trigger level for the drift covariate
+    for cov, drift, name in ((None, None, "ML stationary"), ("lines", None, "ML Woodbury (lines)"),
+                             ("lines", 450, "ML Woodbury (lines) + drift")):
         proc = PulseProcessor(n_components=4, max_shift=10, snr_min=30, n_lines=1,
-                              n_noise_modes=8, covariance=cov).fit(X[tr], noise=noise)
-        r = proc.transform(X)
+                              n_noise_modes=8, covariance=cov, drift_samples=drift)
+        proc.fit(Xraw[tr], noise=noise)
+        r = proc.transform(Xraw)
         res[name] = width(r.s)
-        if cov == "lines":
-            jit_of = np.std(tau[te & line] - np.median(tau[te & line]))
-            res["manifold_mode"] = proc.manifold_.mode_
+        res["manifold_mode"] = proc.manifold_.mode_
+    mass_path = os.path.join(RESULTS, "realdata_mass.json")
+    if os.path.exists(mass_path):
+        with open(mass_path) as f:
+            M = json.load(f)
+        res["MASS (ATS + drift + phase)"] = M["ats"]["phc_all"]
+        res["MASS (5-lag + drift + phase)"] = M["5lag"]["phc_all"]
     res["baseline_limit"] = dict(fwhm=100 * FWHM * of.resolution, err=0.0)
     res["n_train_line"] = int((tr & line).sum())
     res["n_test_line"] = int((te & line).sum())
@@ -90,17 +98,19 @@ def main():
         print(k, v)
 
     plt = mpl()
-    fig, ax = plt.subplots(figsize=(3.4, 2.3))
-    names = ["OF", "OF + phase", "OF + phase + projectors", "ML stationary", "ML Woodbury (lines)"]
-    labels = ["OF", "OF + phase", "OF + phase\n+ projectors", "Manifold ML\n(stationary)",
-              "Manifold ML\n(line-aware)"]
-    cols = [COLORS[k] for k in ("of", "phase", "decor", "stat", "lines")]
+    fig, ax = plt.subplots(figsize=(3.4, 2.5))
+    names = ["OF", "OF + phase", "OF + phase + projectors", "MASS (ATS + drift + phase)",
+             "ML stationary", "ML Woodbury (lines)", "ML Woodbury (lines) + drift"]
+    labels = ["OF", "OF+\nphase", "OF+phase\n+proj.", "MASS\n(ATS+drift\n+phase)",
+              "Manifold\nML (stat.)", "Manifold\nML (lines)", "Manifold\nML (lines)\n+drift"]
+    cols = [COLORS[k] for k in ("of", "phase", "decor", "oracle", "stat", "lines", "lines")]
+    names, labels, cols = zip(*[(n, l, c) for n, l, c in zip(names, labels, cols) if n in res])
     vals = [res[n]["fwhm"] for n in names]
     errs = [res[n]["err"] for n in names]
     ax.bar(range(len(vals)), vals, yerr=errs, color=cols, width=0.65)
     ax.axhline(res["baseline_limit"]["fwhm"], color=COLORS["crb"], ls=":", label="baseline-noise limit")
     ax.set_xticks(range(len(vals)))
-    ax.set_xticklabels(labels, fontsize=5.5)
+    ax.set_xticklabels(labels, fontsize=5)
     ax.set_ylabel("FWHM [% of line energy]")
     ax.legend(frameon=False, fontsize=6, loc="lower left")
     fig.tight_layout()
