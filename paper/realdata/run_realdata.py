@@ -102,7 +102,7 @@ def main():
     ax.set_xticks(range(len(vals)))
     ax.set_xticklabels(labels, fontsize=5.5)
     ax.set_ylabel("FWHM [% of line energy]")
-    ax.legend(frameon=False, fontsize=6)
+    ax.legend(frameon=False, fontsize=6, loc="lower left")
     fig.tight_layout()
     fig.savefig(os.path.join(FIG, "realdata.pdf"))
 

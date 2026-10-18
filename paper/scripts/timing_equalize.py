@@ -61,6 +61,10 @@ def figure():
         ax.axhline(r["crb"] * 5e3, color=c, ls=":", lw=0.8)
     ax.set_xscale("log")
     ax.set_yscale("log")
+    from matplotlib.ticker import NullFormatter, ScalarFormatter
+    ax.yaxis.set_major_formatter(ScalarFormatter())
+    ax.yaxis.set_minor_formatter(NullFormatter())
+    ax.set_yticks([3, 5, 10, 20, 50])
     ax.set_xlabel("records used to learn the correction")
     ax.set_ylabel(r"jitter $\sigma_{t_0}$ [ns]")
     ax.legend(frameon=False, fontsize=6)
