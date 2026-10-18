@@ -66,14 +66,14 @@ the training lines.
 | Optimal filter (5.9 keV template) | 2.01 | 4.34 | 7.24 | 9.99 | 12.40 |
 | OF + phase correction + residual-projector decorrelation | 1.73 | 1.91 | 2.12 | 2.56 | 3.10 |
 | Energy-dependent full-covariance filter (Fixsen / SIRENA style) | 1.76 | 2.19 | 2.72 | 3.00 | 3.30 |
-| **this work** (line-aware Woodbury ML) | **1.71** | **1.91** | **2.03** | **2.31** | **2.59** |
+| **this work** (line-aware Woodbury ML) | **1.71** | **1.91** | **2.04** | **2.30** | **2.56** |
 | oracle local Gaussian model | 1.74 | 1.92 | 2.05 | 2.31 | 2.57 |
 
 **Against a plain OF** the gain is large, but most of it is also available from a
 well-tuned empirical correction chain.
 
 **Against the best prior-art baseline** at each line the method is level at low
-energy and up to 17 % better at high energy. With no shape fluctuation at all it is
+energy and up to 18 % better at high energy. With no shape fluctuation at all it is
 up to 8 % better.
 
 **Against a full-covariance filter** trained on the same calibration pulses, the
@@ -96,6 +96,13 @@ simulated baselines may understate real practice.
 
 `PhaseEqualizer` removes the sampling-phase bias of arrival times without labels,
 given about 10^5 records per energy.
+
+**Phonon-mediated detector** (simulated, strong position dependence, line-free science
+data; `paper/scripts/run_phonon.py`): with the covariance learned on a calibration
+run, the method is 1.2–3.6× better than an energy-dependent full-covariance filter
+within the calibrated range (e.g. 33 vs 52 eV at 5 keV). A model trained on the
+science data alone cannot remove the position dependence, as the identifiability
+result predicts.
 
 See `paper/` for the full study and `paper/PRIOR_ART.md` for the prior-art review.
 

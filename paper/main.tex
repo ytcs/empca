@@ -59,7 +59,11 @@ closed by tuned empirical corrections. Against the best of four prior-art
 pipelines, the estimator is level at low energy and up to \impBestTopMorph\% better
 at 11\,keV, within \oracleGap\,eV of an oracle. On real single-line NIST TES data it
 matches, but does not beat, NIST's own MASS pipeline (\realOursDrift\% against
-\realMassATS\% FWHM). A label-free sampling-phase correction brings arrival times close to the
+\realMassATS\% FWHM). In a simulated phonon-mediated detector with
+line-free science data, covariances learned on a calibration run give
+\phGainCovMin--\phGainCovMax{} times better resolution than an energy-dependent
+full-covariance filter, whereas nothing learned from the science data alone
+removes the position dependence. A label-free sampling-phase correction brings arrival times close to the
 Cramér--Rao bound, but it needs about $10^5$ records per energy. An
 open-source Python implementation accompanies the paper.
 \end{abstract}
@@ -523,7 +527,14 @@ $\vect z_j=\Sh{-\hat\tau_j}\yw^{(j)}$ supply residuals. We take $V_r$ as the top
 eigenvectors of the pooled residual covariance projected onto the complement of
 $\operatorname{span}(B)$. $\Sigma$ is estimated at knots $s_b$ as
 $V\widehat{\operatorname{Cov}}_b(\vect z)V^\T-I$, a $K_v\times K_v$ matrix that is
-well determined from a few hundred events, with $\Sigma(0)=0$, and
+well determined from a few hundred events. Between knots it is interpolated through
+a square-root factor: the positive part is written as $FF^\T$, consecutive
+factors are aligned by orthogonal Procrustes rotation, and $F$ is interpolated
+with a monotone cubic (the small negative part entry-wise). Interpolating
+covariance entries instead turns a fluctuation whose direction rotates between
+two lines into a weaker two-direction mixture, which misdirects the oblique
+projection between sparse calibration lines (\cref{sec:phonon}). Eigenvalues are
+clipped at with $\Sigma(0)=0$, and
 interpolated with a monotone cubic (PCHIP) per entry, with eigenvalues clipped at
 $-\frac12$. The definition of the residual matters.
 
@@ -556,7 +567,8 @@ cluster covariance with genuine energy spread.
 
 \subsection{Optimisation and Cramér--Rao bounds}
 We maximise~\eqref{eq:woodbury} jointly over $(s,\tau)$ with a Levenberg-damped
-$2\times2$ Newton iteration and backtracking, vectorised over records. Derivatives
+$2\times2$ Newton iteration and backtracking, vectorised over records. Steps in $s$
+are capped at $0.25(|s|+40)$, because nuisance corrections scale with the signal. Derivatives
 in $\tau$ are analytic, via~\eqref{eq:xcorr}; derivatives in $s$ are central
 differences of the $K_b$-dimensional expression. The iteration starts from the
 Stage A/B estimates. The Fisher information of the learned model
@@ -971,6 +983,52 @@ Dotted: baseline-noise limit of the OF.}
 \label{fig:realdata}
 \end{figure}
 
+\subsection{Phonon-mediated detector with line-free science data}
+\label{sec:phonon}
+Dark-matter detectors read athermal phonons from a large crystal. Their science
+data contain no lines, and their pulse shapes depend strongly on the event
+position. We extend the simulator with a crystal body (two-component pulses: fast
+athermal collection plus slow crystal heating, in the spirit of the CRESST pulse
+model) and with uniformly distributed 3-D event positions. A path-length proxy
+$d=(\rho^2+z)/2$ sets the athermal collection efficiency, $\varepsilon\propto1-0.2d$,
+and time, $\tau_a=\tau_{a,0}(1+d)$, so amplitude and shape change together. A
+further 1\% amplitude-only radial term cannot be separated from energy by any
+single-channel estimator. A calibration run ($2\times10^4$ events; 70\% in lines at
+1.3, 5.9, 10.4, 14.4, 17.5 and 22.2\,keV on a flat continuum) and an independent
+science run without lines ($2\times10^4$ events, flat plus exponential background,
+0.5--25\,keV) are simulated. All energy scales come from the calibration lines,
+whose identities are given to every line-aware method, ours and the baselines
+alike. The resolution is scored on the science run from the simulation truth: the
+FWHM of the energy error in bins of true energy, after removing a local linear
+trend so that calibration-interpolation bias is not counted.
+
+\Cref{fig:phonon} shows the outcome. Without lines, the label-free variant trained
+on science data cannot remove the position dependence (\phFreeB\,eV at 5\,keV), and
+neither can the OF (\phOFB\,eV). This is \cref{prop:identifiability} in its starkest
+form. With the covariance learned on the calibration run, our estimator reaches
+\phCalA, \phCalB, \phCalC{} and \phCalD\,eV at 1, 5, 13.75 and 21.25\,keV. That is
+\phGainCovMin--\phGainCovMax{} times better than the energy-dependent full-covariance
+filter trained on the same calibration run (\phCovA, \phCovB, \phCovC{} and
+\phCovD\,eV), across the whole range covered by calibration lines. Our implementation of the
+empirical projector correction works at low energy (\phProjA\,eV at 1\,keV) but fails
+at high energy, where position effects are large and non-linear. Given the
+real-data experience, a better-tuned version may do better. Above the last
+calibration line our estimator extrapolates and loses its advantage (\phCalE{}
+against \phCovE\,eV at 23.75\,keV). Adding the science run to the training, so
+that its continuum constrains the manifold, changes little (\phBothB\,eV at
+5\,keV). Two implementation details were essential here. First, the step size of
+the likelihood maximisation must scale with the signal. Second, $\Sigma(s)$ must be
+interpolated through aligned square-root factors: entry-wise interpolation of
+$\Sigma$ gave errors of several hundred eV between the sparse calibration lines.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/phonon.pdf}
+\caption{Phonon-mediated detector: FWHM of the energy error on the line-free
+science run versus true energy. Line-aware methods use the calibration run.}
+\label{fig:phonon}
+\end{figure}
+
 %==========================================================================
 \section{Discussion}
 \label{sec:discussion}
@@ -1022,7 +1080,9 @@ the noise-free manifold is known, conversion between gauges is a deterministic
 post-processing step.
 
 \paragraph{Limitations and outlook.} The non-linear regime is tested only in
-simulation. The real-data test of \cref{sec:realdata} covers a single line and
+simulation, including the phonon-mediated case of \cref{sec:phonon}, where
+calibration-run covariances transfer to line-free science data but cannot be
+replaced by anything learned from the science data alone. The real-data test of \cref{sec:realdata} covers a single line and
 confirms the shift-invariant learning, the line-aware covariance and its
 robustness. Next, the method needs multi-line or continuum data from saturating
 arrays with pile-up, gain drift and non-Gaussian tails in the shape fluctuations. Pile-up rejection can use the likelihood

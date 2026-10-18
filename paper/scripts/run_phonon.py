@@ -108,7 +108,7 @@ def figure():
     plt = mpl()
     style = {"OF": ("of", "-"), "OF + phase": ("phase", "--"),
              "OF + phase + projectors": ("decor", "--"), "Covariance filter": ("covar", "--"),
-             "This work, label-free (science only)": ("curve", "-"),
+             "This work, label-free (science only)": ("oracle", "-"),
              "This work, line-aware (calibration run)": ("stat", "-"),
              "This work, line-aware (calibration + science)": ("lines", "-")}
     fig, ax = plt.subplots(figsize=(3.4, 2.9))
