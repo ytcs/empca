@@ -102,9 +102,12 @@ class ManifoldFitter:
     def _power(self, Yh):
         return np.sum(np.abs(Yh) ** 2 * rfft_weights(self.n), axis=1) / self.n
 
-    def fit(self, traces, s0, tau0, n_iter=12, h=0.05, max_ds=10.0, batch=8192):
+    def fit(self, traces, s0, tau0, n_iter=12, h=0.05, max_ds=None, batch=8192):
         """Damped Newton maximisation of the likelihood from ``(s0, tau0)``.
 
+        ``max_ds`` caps each step in ``s``; by default it scales with the
+        signal, ``0.25 (|s| + 40)``, because nuisance corrections are a fixed
+        fraction of the amplitude (backtracking guarantees descent anyway).
         Returns ``s, tau, nll`` (``nll`` = ``-2 log L`` up to a constant).
         """
         traces = np.atleast_2d(traces)
@@ -135,7 +138,8 @@ class ManifoldFitter:
             det = a * d - fst ** 2
             ds = -(d * fs - fst * ft) / det
             dt = -(a * ft - fst * fs) / det
-            ds = np.clip(ds, -max_ds, max_ds)
+            cap = 0.25 * (np.abs(s) + 40.0) if max_ds is None else max_ds
+            ds = np.clip(ds, -cap, cap)
             dt = np.clip(dt, -0.5, 0.5)
             done = np.zeros(len(s), bool)
             for _ in range(4):
