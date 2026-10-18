@@ -55,7 +55,25 @@ def main():
     TE = load_json("timing_equalize.json")
     te_hi = TE[-1]
     n_max = max(int(k) for k in te_hi["after"])
-    macros = dict(
+    PH = load_json("phonon.json")
+    def ph(name, e):
+        r = PH[name]
+        return min(r, key=lambda x: abs(x["E"] - e))["fwhm"]
+    PHN = {"OF": "phOF", "OF + phase + projectors": "phProj", "Covariance filter": "phCov",
+           "This work, label-free (science only)": "phFree",
+           "This work, line-aware (calibration run)": "phCal",
+           "This work, line-aware (calibration + science)": "phBoth"}
+    ph_macros = {}
+    for name, tag in PHN.items():
+        for e, et in ((1000, "A"), (5000, "B"), (13750, "C"), (21250, "D"), (23750, "E")):
+            ph_macros[tag + et] = fmt(ph(name, e), 0)
+    ours_ph = np.array([x["fwhm"] for x in PH["This work, line-aware (calibration run)"]])
+    cov_ph = np.array([x["fwhm"] for x in PH["Covariance filter"]])
+    proj_ph = np.array([x["fwhm"] for x in PH["OF + phase + projectors"]])
+    inside = np.array([x["E"] for x in PH["Covariance filter"]]) < 22200
+    ph_macros["phGainCovMin"] = fmt(np.min(cov_ph[inside] / ours_ph[inside]), 1)
+    ph_macros["phGainCovMax"] = fmt(np.max(cov_ph[inside] / ours_ph[inside]), 1)
+    macros = dict(**ph_macros,
         realOF=fmt(RD["OF"]["fwhm"], 3), realPhase=fmt(RD["OF + phase"]["fwhm"], 3),
         realDecor=fmt(RD["OF + phase + projectors"]["fwhm"], 3),
         realStat=fmt(RD["ML stationary"]["fwhm"], 3), realOurs=fmt(RD["ML Woodbury (lines)"]["fwhm"], 3),
