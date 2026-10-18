@@ -136,13 +136,38 @@ class LowRankNoise:
         sig = [sig[i] for i in order]
         self.s_knots_ = np.asarray(centers)
         self.sigma_knots_ = np.asarray(sig)
-        self._interp = PchipInterpolator(self.s_knots_, self.sigma_knots_, axis=0, extrapolate=False)
+        self._build_interpolator()
         return self
+
+    def _build_interpolator(self):
+        """Interpolate Sigma(s) through square-root factors aligned between knots.
+
+        Entry-wise interpolation of two covariances whose dominant direction
+        rotates between knots produces a weaker two-direction mixture.  Instead
+        the positive part is written as F F^T, consecutive factors are aligned by
+        orthogonal Procrustes (F_k <- F_k Q, Q = argmin ||F_k Q - F_{k-1}||), and F
+        is interpolated, so a rotating fluctuation stays one rotating direction.
+        The (small) negative part is interpolated entry-wise.
+        """
+        pos, neg = [], []
+        prev = None
+        for S in self.sigma_knots_:
+            w, U = np.linalg.eigh(0.5 * (S + S.T))
+            F = U * np.sqrt(np.clip(w, 0, None))
+            if prev is not None:
+                u, _, vt = np.linalg.svd(F.T @ prev)
+                F = F @ (u @ vt)
+            prev = F
+            pos.append(F)
+            neg.append((U * np.clip(w, None, 0)) @ U.T)
+        self._finterp = PchipInterpolator(self.s_knots_, np.asarray(pos), axis=0, extrapolate=False)
+        self._ninterp = PchipInterpolator(self.s_knots_, np.asarray(neg), axis=0, extrapolate=False)
 
     def sigma_eig(self, s):
         """Eigen-decomposition ``(w, U)`` of ``Sigma(s)`` with the floor applied."""
         s = np.clip(np.atleast_1d(np.asarray(s, float)), self.s_knots_[0], self.s_knots_[-1])
-        S = self._interp(s)
+        F = self._finterp(s)
+        S = F @ np.swapaxes(F, 1, 2) + self._ninterp(s)
         S = 0.5 * (S + np.swapaxes(S, 1, 2))
         w, U = np.linalg.eigh(S)
         return np.clip(w, -self.floor, None), U
